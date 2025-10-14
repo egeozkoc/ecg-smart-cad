@@ -1,0 +1,346 @@
+"""
+ECG Model Evaluation Script for Median Beats
+
+This script evaluates a trained ECG model on validation/test splits of preprocessed median-beat data.
+It computes operating thresholds from validation data, calculates metrics with 95% bootstrap 
+confidence intervals, and exports results including probability arrays and ROC plots.
+
+Key features:
+- Loads val/test splits from preprocessed_median_beats/
+- Derives rule-out, rule-in, and F1-optimal thresholds from validation data
+- Computes metrics with bootstrap CIs for robust statistical reporting
+- Exports probability arrays as .npy files for further analysis
+- Generates combined validation+test ROC curves and confusion matrix plots
+- Saves comprehensive results table as CSV with confidence intervals
+"""
+
+from ecg_models import *
+import numpy as np
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_score, precision_score, recall_score, f1_score, roc_curve, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+import os
+
+
+def load_split_data(base_path, split, selected_outcome):
+    """Load a split's data (val/test) for evaluation."""
+    split_csv = f'{base_path}/{split}_data.csv'
+    df = pd.read_csv(split_csv)
+    ids = df['id'].to_list()
+    outcomes = df[selected_outcome].to_numpy()
+
+    data_list = []
+    for sample_id in ids:
+        arr = np.load(f'{base_path}/{split}_data/{sample_id}.npy', allow_pickle=True)
+        data_list.append(arr)
+    data = np.array(data_list)
+    return data, outcomes
+
+
+def evaluate_split(model, device, dataloader, criterion):
+    """Evaluate a split and return base outputs for metric computation."""
+    model.eval()
+    total_loss = 0
+    total_samples = 0
+
+    all_y_true = []
+    all_pred_probs = []
+
+    with torch.no_grad():
+        for (x, y) in dataloader:
+            x = x.to(device)
+            y = y.to(device)
+            x = torch.unsqueeze(x, 1)
+
+            with torch.amp.autocast(device.type, enabled=True):
+                logits = model(x)
+                loss = criterion(logits, y)
+                probs = torch.softmax(logits, dim=-1)
+
+            batch_size = y.size(0)
+            total_loss += loss.item() * batch_size
+            total_samples += batch_size
+
+            all_pred_probs.append(probs[:, 1].detach().cpu().to(torch.float32).numpy())
+            all_y_true.append(y.detach().cpu().numpy())
+
+    y_true = np.concatenate(all_y_true, axis=0)
+    y_prob_pos = np.concatenate(all_pred_probs, axis=0)
+    avg_loss = total_loss / max(total_samples, 1)
+    return avg_loss, y_true, y_prob_pos
+
+
+def find_thresholds_from_val(y_true, y_prob_pos):
+    """Compute thresholds based on validation data.
+    - Rule-out: highest threshold achieving sensitivity >= 0.90
+    - Rule-in: lowest threshold achieving PPV >= 0.85
+    - F1: threshold maximizing F1
+    """
+    fpr, tpr, thresholds = roc_curve(y_true, y_prob_pos)
+
+    # Rule-out threshold (maximize threshold while sens >= 0.90)
+    rule_out_idx = np.where(tpr >= 0.90)[0]
+    rule_out_thresh = thresholds[rule_out_idx[0]] if len(rule_out_idx) > 0 else None
+
+
+    # Rule-in threshold (first threshold with PPV >= 0.85)
+    ppv_values = []
+    for t in thresholds:
+        preds_t = (y_prob_pos >= t).astype(int)
+        if preds_t.sum() == 0:
+            ppv_values.append(0.0)
+        else:
+            ppv_values.append(precision_score(y_true, preds_t, zero_division=0))
+    ppv_values = np.array(ppv_values)
+    rule_in_idx = np.where(ppv_values >= 0.85)[0]
+    rule_in_thresh = thresholds[rule_in_idx[-1]] if len(rule_in_idx) > 0 else None
+
+    # F1 threshold
+    f1_values = []
+    for t in thresholds:
+        preds_t = (y_prob_pos >= t).astype(int)
+        f1_values.append(f1_score(y_true, preds_t, zero_division=0))
+    f1_values = np.array(f1_values)
+    f1_thresh = thresholds[np.argmax(f1_values)]
+
+    return rule_out_thresh, rule_in_thresh, f1_thresh
+
+
+def compute_metrics(y_true, y_prob_pos, threshold):
+    preds = (y_prob_pos >= threshold).astype(int)
+    sens = recall_score(y_true, preds, zero_division=0)
+    spec = recall_score(y_true, preds, pos_label=0, zero_division=0)
+    acc = accuracy_score(y_true, preds)
+    ppv = precision_score(y_true, preds, pos_label=1, zero_division=0)
+    npv = precision_score(y_true, preds, pos_label=0, zero_division=0)
+    f1 = f1_score(y_true, preds, zero_division=0)
+    auc = roc_auc_score(y_true, y_prob_pos)
+    ap = average_precision_score(y_true, y_prob_pos)
+    return {
+        'sens': sens,
+        'spec': spec,
+        'acc': acc,
+        'ppv': ppv,
+        'npv': npv,
+        'f1': f1,
+        'auc': auc,
+        'ap': ap,
+    }
+
+
+def bootstrap_ci_val(y_true, y_prob_pos, n_boot=1000, seed=42):
+    """Bootstrap 95% CIs for validation metrics, recomputing F1 threshold per resample."""
+    rng = np.random.default_rng(seed)
+    metrics = {'auc': [], 'ap': [], 'f1': [], 'sens': [], 'spec': [], 'acc': [], 'ppv': [], 'npv': []}
+    n = len(y_true)
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        y_b = y_true[idx]
+        p_b = y_prob_pos[idx]
+        _, _, f1_t = find_thresholds_from_val(y_b, p_b)
+        m = compute_metrics(y_b, p_b, f1_t)
+        for k in metrics.keys():
+            metrics[k].append(m[k])
+    ci = {}
+    for k, vals in metrics.items():
+        vals = np.array(vals)
+        ci[k] = (np.percentile(vals, 2.5), np.percentile(vals, 97.5))
+    return ci
+
+
+def bootstrap_ci_test(y_true, y_prob_pos, threshold=0.5, n_boot=1000, seed=42):
+    """Bootstrap 95% CIs for test metrics at a fixed threshold."""
+    rng = np.random.default_rng(seed)
+    metrics = {'auc': [], 'ap': [], 'f1': [], 'sens': [], 'spec': [], 'acc': [], 'ppv': [], 'npv': []}
+    n = len(y_true)
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        y_b = y_true[idx]
+        p_b = y_prob_pos[idx]
+        m = compute_metrics(y_b, p_b, threshold)
+        for k in metrics.keys():
+            metrics[k].append(m[k])
+    ci = {}
+    for k, vals in metrics.items():
+        vals = np.array(vals)
+        ci[k] = (np.percentile(vals, 2.5), np.percentile(vals, 97.5))
+    return ci
+
+
+def format_with_ci(value, ci_tuple):
+    """Format like 0.945 [0.913,0.972]."""
+    low, high = ci_tuple
+    return f"{value:.3f} [{low:.3f},{high:.3f}]"
+
+
+def r3(x):
+    return None if x is None else float(f"{x:.3f}")
+
+
+
+def plot_val_test_roc(y_val_true, y_val_prob, y_test_true, y_test_prob, model_name, save_path, selected_outcome):
+    """Plot validation and test ROC curves on the same figure and save."""
+    fpr_v, tpr_v, _ = roc_curve(y_val_true, y_val_prob)
+    auc_v = roc_auc_score(y_val_true, y_val_prob)
+
+    fpr_t, tpr_t, _ = roc_curve(y_test_true, y_test_prob)
+    auc_t = roc_auc_score(y_test_true, y_test_prob)
+
+    plt.figure(figsize=(10, 8))
+    plt.plot(fpr_t, tpr_t, color='tab:blue', lw=2, label=f'Test ROC (AUC = {auc_t:.3f})')
+    plt.plot(fpr_v, tpr_v, color='tab:orange', lw=2, linestyle='--', label=f'Val ROC (AUC = {auc_v:.3f})')
+    plt.plot([0, 1], [0, 1], color='gray', lw=1, linestyle=':')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title(f'ROC Curves - {model_name}')
+    plt.legend(loc="lower right")
+    plt.grid(True, alpha=0.3)
+
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Val+Test ROC curves saved to: {save_path}")
+
+
+def plot_confusion_matrix(cm, model_name, save_path, selected_outcome):
+    """Plot confusion matrix and save it"""
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=[f'No {selected_outcome}', f'{selected_outcome}'], 
+                yticklabels=[f'No {selected_outcome}', f'{selected_outcome}'])
+    plt.title(f'Confusion Matrix - {model_name}')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+
+    # Save the plot
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Confusion matrix saved to: {save_path}")
+
+
+
+def main():
+    # Define model path in a single line
+    model_path = 'models/ecgsmartnet_attention_acs_2025-10-05-18-54-27.pt'
+    selected_outcome = 'acs' # 'acs' or 'omi'
+
+    # Device
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+    # Load splits
+    x_val_np, y_val_np = load_split_data('preprocessed_median_beats', 'val', selected_outcome)
+    x_test_np, y_test_np = load_split_data('preprocessed_median_beats', 'test', selected_outcome)
+
+    # Build dataloaders
+    x_val = torch.tensor(x_val_np, dtype=torch.float32)
+    y_val = torch.tensor(y_val_np, dtype=torch.long)
+    val_loader = DataLoader(TensorDataset(x_val, y_val), batch_size=64, shuffle=False)
+
+    x_test = torch.tensor(x_test_np, dtype=torch.float32)
+    y_test = torch.tensor(y_test_np, dtype=torch.long)
+    test_loader = DataLoader(TensorDataset(x_test, y_test), batch_size=64, shuffle=False)
+
+    # Load model
+    model = torch.load(model_path, map_location=device, weights_only=False)
+    model.eval()
+    criterion = torch.nn.CrossEntropyLoss()
+
+    # Evaluate validation and test splits
+    _, y_val_true, y_val_prob = evaluate_split(model, device, val_loader, criterion)
+    _, y_test_true, y_test_prob = evaluate_split(model, device, test_loader, criterion)
+    
+    # Derive thresholds from validation split
+    rule_out_thresh, rule_in_thresh, f1_thresh = find_thresholds_from_val(y_val_true, y_val_prob)
+    
+    # Compute validation metrics at F1 threshold
+    val_metrics = compute_metrics(y_val_true, y_val_prob, f1_thresh)
+    val_ci = bootstrap_ci_val(y_val_true, y_val_prob)
+
+    # Test metrics at 0.5 threshold (to match your table)
+    test_metrics = compute_metrics(y_test_true, y_test_prob, 0.5)
+    test_ci = bootstrap_ci_test(y_test_true, y_test_prob, 0.5)
+
+    # Confusion matrix at 0.5 threshold
+    test_preds_05 = (y_test_prob >= 0.5).astype(int)
+    cm = confusion_matrix(y_test_true, test_preds_05)
+
+    # Print results in requested format (single-column model)
+    print('=' * 80)
+    print('Results for {}'.format(model_path))
+    print('-' * 80)
+    print(f"Rule Out Thresh\nSens > 0.90\n{r3(rule_out_thresh):.3f}")
+    print(f"Rule In Thresh\nPPV > 0.85\n{r3(rule_in_thresh):.3f}")
+    print(f"F1 Thresh\n{r3(f1_thresh):.3f}")
+
+    print(f"Val AUC\n{format_with_ci(val_metrics['auc'], val_ci['auc'])}")
+    print(f"Val AP\n{format_with_ci(val_metrics['ap'], val_ci['ap'])}")
+    print(f"Val F1\n{format_with_ci(val_metrics['f1'], val_ci['f1'])}")
+    print(f"Val Sens\n{format_with_ci(val_metrics['sens'], val_ci['sens'])}")
+    print(f"Val Spec\n{format_with_ci(val_metrics['spec'], val_ci['spec'])}")
+    print(f"Val Acc\n{format_with_ci(val_metrics['acc'], val_ci['acc'])}")
+    print(f"Val PPV\n{format_with_ci(val_metrics['ppv'], val_ci['ppv'])}")
+    print(f"Val NPV\n{format_with_ci(val_metrics['npv'], val_ci['npv'])}")
+
+
+    print(f"Test AUC\n{format_with_ci(roc_auc_score(y_test_true, y_test_prob), test_ci['auc'])}")
+    print(f"Test AP\n{format_with_ci(average_precision_score(y_test_true, y_test_prob), test_ci['ap'])}")
+    print(f"Test F1\n{format_with_ci(test_metrics['f1'], test_ci['f1'])}")
+    print(f"Test Sens\n{format_with_ci(test_metrics['sens'], test_ci['sens'])}")
+    print(f"Test Spec\n{format_with_ci(test_metrics['spec'], test_ci['spec'])}")
+    print(f"Test Acc\n{format_with_ci(test_metrics['acc'], test_ci['acc'])}")
+    print(f"Test PPV\n{format_with_ci(test_metrics['ppv'], test_ci['ppv'])}")
+    print(f"Test NPV\n{format_with_ci(test_metrics['npv'], test_ci['npv'])}")
+    print('=' * 80)
+
+    # Save results and plots
+    os.makedirs('test_results_median_beats', exist_ok=True)
+    model_name = os.path.basename(model_path).replace('.pt', '')
+
+    # Save metrics table to CSV in the displayed order, with CI columns (rounded to 3 decimals)
+    rows = [
+        ['Rule Out Thresh (Sens > 0.90)', r3(rule_out_thresh), None, None],
+        ['Rule In Thresh (PPV > 0.85)', r3(rule_in_thresh), None, None],
+        ['F1 Thresh', r3(f1_thresh), None, None],
+        ['Val AUC', r3(val_metrics['auc']), r3(val_ci['auc'][0]), r3(val_ci['auc'][1])],
+        ['Val AP', r3(val_metrics['ap']), r3(val_ci['ap'][0]), r3(val_ci['ap'][1])],
+        ['Val F1', r3(val_metrics['f1']), r3(val_ci['f1'][0]), r3(val_ci['f1'][1])],
+        ['Val Sens', r3(val_metrics['sens']), r3(val_ci['sens'][0]), r3(val_ci['sens'][1])],
+        ['Val Spec', r3(val_metrics['spec']), r3(val_ci['spec'][0]), r3(val_ci['spec'][1])],
+        ['Val Acc', r3(val_metrics['acc']), r3(val_ci['acc'][0]), r3(val_ci['acc'][1])],
+        ['Val PPV', r3(val_metrics['ppv']), r3(val_ci['ppv'][0]), r3(val_ci['ppv'][1])],
+        ['Val NPV', r3(val_metrics['npv']), r3(val_ci['npv'][0]), r3(val_ci['npv'][1])],
+        ['Test AUC', r3(roc_auc_score(y_test_true, y_test_prob)), r3(test_ci['auc'][0]), r3(test_ci['auc'][1])],
+        ['Test AP', r3(average_precision_score(y_test_true, y_test_prob)), r3(test_ci['ap'][0]), r3(test_ci['ap'][1])],
+        ['Test F1', r3(test_metrics['f1']), r3(test_ci['f1'][0]), r3(test_ci['f1'][1])],
+        ['Test Sens', r3(test_metrics['sens']), r3(test_ci['sens'][0]), r3(test_ci['sens'][1])],
+        ['Test Spec', r3(test_metrics['spec']), r3(test_ci['spec'][0]), r3(test_ci['spec'][1])],
+        ['Test Acc', r3(test_metrics['acc']), r3(test_ci['acc'][0]), r3(test_ci['acc'][1])],
+        ['Test PPV', r3(test_metrics['ppv']), r3(test_ci['ppv'][0]), r3(test_ci['ppv'][1])],
+        ['Test NPV', r3(test_metrics['npv']), r3(test_ci['npv'][0]), r3(test_ci['npv'][1])],
+    ]
+    metrics_df = pd.DataFrame(rows, columns=['Metric', 'Value', 'CI_low', 'CI_high'])
+    metrics_df.to_csv(f'test_results_median_beats/{model_name}_results.csv', index=False)
+
+    # Save probabilities as .npy files
+    np.save(f'test_results_median_beats/{model_name}_val_probabilities.npy', y_val_prob)
+    np.save(f'test_results_median_beats/{model_name}_test_probabilities.npy', y_test_prob)
+    print(f"Probabilities saved to test_results_median_beats/{model_name}_*_probabilities.npy")
+
+    # Save plots (combined val+test ROC and confusion matrix)
+    plot_val_test_roc(
+        y_val_true,
+        y_val_prob,
+        y_test_true,
+        y_test_prob,
+        model_name,
+        f'test_results_median_beats/{model_name}_roc.png',
+        selected_outcome
+    )
+    plot_confusion_matrix(cm, model_name, f'test_results_median_beats/{model_name}_cm.png', selected_outcome)
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,5 @@
+conda activate ecg_py_lib
+
+cd onedrive/documents/college/research/ecg/ecg datasets/ecgsmart exe
+
+pyinstaller --hidden-import=sklearn.ensemble._forest --hidden-import=scipy.special._cdflib --onefile ecg_smart.py
