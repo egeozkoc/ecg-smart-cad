@@ -1,0 +1,5 @@
+*.xml
+*.xlsx
+*.npy
+*.txt
+.DS_Store
