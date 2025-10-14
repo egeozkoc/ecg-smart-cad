@@ -11,10 +11,9 @@ from sklearn.impute import SimpleImputer
 import joblib
 from sklearn.svm import SVC
 
-def get_data(lpf):
+def get_data():
     # Use a single features file for all runs
-    features = pd.read_csv('features.csv')
-    features = features.replace({'Male':0, 'Female':1, 'Not Known':0})
+    features = pd.read_csv('results/features.csv')
 
     # Load feature names from single text file (one feature per line)
     feature_names = pd.read_csv('features.txt', header=None)[0].tolist()
@@ -25,9 +24,9 @@ def get_data(lpf):
     y_train = train_df['label'].to_numpy()
     y_val = val_df['label'].to_numpy()
     y_test = test_df['label'].to_numpy()
-    train_ids = train_df['id'].to_list()
-    val_ids = val_df['id'].to_list()
-    test_ids = test_df['id'].to_list()
+    train_ids = train_df['ID'].to_list()
+    val_ids = val_df['ID'].to_list()
+    test_ids = test_df['ID'].to_list()
 
     x_train = []
     for id in train_ids:
@@ -61,13 +60,13 @@ def get_data(lpf):
 
     return x_train, y_train, x_val, y_val, x_test, y_test
 
-def train_model(lpf):
+def train_model():
     # Get Data
-    x_train, y_train, x_val, y_val, x_test, y_test = get_data(lpf)
+    x_train, y_train, x_val, y_val, x_test, y_test = get_data()
 
     # Set hyperparameters
-    # num_estimators = [25, 50, 75, 100, 150, 200]
-    num_estimators = [50]
+    num_estimators = [25, 50, 75, 100, 150, 200]
+    # num_estimators = [50]
     class_weights = ['balanced_subsample']
     criterions = ['entropy', 'gini']
     max_features = ['sqrt', 'log2', None]
@@ -141,12 +140,9 @@ def train_model(lpf):
                                             print('Best Running Test AUC:', auc_test)
                                             print('Best Running Test AP:', ap_test)
                                             print('Best Running Params:', best_params)
-                                            if lpf == 150:
-                                                np.save('best_params_selectedfeat150hz.npy', best_params)
-                                                joblib.dump(clf, 'best_rf150hz.pkl')
-                                            elif lpf == 100:
-                                                np.save('best_params_selectedfeat100hz.npy', best_params)
-                                                joblib.dump(clf, 'best_rf100hz.pkl')
+                                            np.save('best_params.npy', best_params)
+                                            joblib.dump(clf, 'best_rf.pkl')
+
     print('Best Val Score:', best_score)
     print('Best Val AUC:', best_auc)
     print('Best Val AP:', best_ap)
@@ -155,14 +151,11 @@ def train_model(lpf):
     print('Best Test AP:', best_ap_test)
     print('Best Params:', best_params)
 
-def test_model(lpf):
+def test_model():
     # Get Data
-    x_train, y_train, x_val, y_val, x_test, y_test = get_data(lpf)
+    x_train, y_train, x_val, y_val, x_test, y_test = get_data()
 
-    if lpf == 150:
-        clf = joblib.load('best_rf150hz.pkl')
-    elif lpf == 100:
-        clf = joblib.load('best_rf100hz.pkl')
+    features = pd.read_csv('results/features.csv')
 
     y_pred = clf.predict_proba(x_val)[:,1]
     auc_val = roc_auc_score(y_val, y_pred)
@@ -205,9 +198,9 @@ def test_model(lpf):
     print('Test AUC:', auc_test)
     print('Test AP:', ap_test)
 
-def train_model_all_features(lpf):
+def train_model_all_features():
     # Get Data
-    x_train, y_train, x_val, y_val, x_test, y_test = get_data(lpf)
+    x_train, y_train, x_val, y_val, x_test, y_test = get_data()
     clf = RandomForestClassifier(class_weight='balanced_subsample', criterion='entropy', n_jobs=-1, random_state=42,
                                                             max_features='log2', 
                                                             n_estimators=50,
@@ -232,11 +225,10 @@ def train_model_all_features(lpf):
     print('Test AUC:', auc_test)
     print('Test AP:', ap_test)
 
-    joblib.dump(clf, 'models/rf_100hz_148_features.pkl')
+    joblib.dump(clf, 'models/rf_all_features.pkl')
 
 if __name__ == '__main__':
-    lpf = 100
 
-    # train_model(lpf)
-    train_model_all_features(lpf)
-    # test_model(lpf)
+    train_model()
+    # train_model_all_features()
+    # test_model()
