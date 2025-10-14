@@ -411,14 +411,16 @@ def get10sec(filename, lpf=100):
 
     ecg = ecg.reshape(12,-1)
     nonzero_leads = np.where(np.sum(np.abs(ecg),axis=1) != 0)[0]
-    corrs = np.abs(np.corrcoef(ecg[nonzero_leads]))
-    corrs = np.sum(corrs,axis=1) - 1
-    corrs /= (len(nonzero_leads) - 1)
-    bad_leads = np.zeros(12)
-    bad_leads[nonzero_leads[corrs < 0.05]] = 1
-    bad_leads[[2,3,4,5]] = 0
+    # If fewer than 2 non-zero leads remain, skip correlation filtering to avoid AxisError
+    if len(nonzero_leads) > 1:
+        corrs = np.abs(np.corrcoef(ecg[nonzero_leads]))
+        corrs = np.sum(corrs,axis=1) - 1
+        corrs /= (len(nonzero_leads) - 1)
+        bad_leads = np.zeros(12)
+        bad_leads[nonzero_leads[corrs < 0.05]] = 1
+        bad_leads[[2,3,4,5]] = 0
 
-    ecg[bad_leads == 1] = 0
+        ecg[bad_leads == 1] = 0
 
 ############################################################################################################
 # Remove missing leads
