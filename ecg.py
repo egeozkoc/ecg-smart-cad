@@ -72,6 +72,12 @@ class ECG:
 
 def process_file(args):
     filename, folder1, lpf = args
+    # Skip processing if output already exists
+    file_id = os.path.basename(filename).split('.')[0]
+    out_path = os.path.join(folder1, file_id + '.npy')
+    if os.path.exists(out_path):
+        print(f"Skipping {filename} (already processed at {out_path})")
+        return
     ecg = ECG(filename)
     ecg.processRawData(lpf)
     ecg.processMedian()
