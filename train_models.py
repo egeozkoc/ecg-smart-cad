@@ -123,9 +123,9 @@ def get_data(path):
     train_df = pd.read_csv('train_set.csv')
     val_df = pd.read_csv('val_set.csv')
     test_df = pd.read_csv('test_set.csv')
-    train_outcomes = train_df.to_numpy()
-    val_outcomes = val_df.to_numpy()
-    test_outcomes = test_df.to_numpy()
+    train_outcomes = train_df['label'].to_numpy()
+    val_outcomes = val_df['label'].to_numpy()
+    test_outcomes = test_df['label'].to_numpy()
     train_ids = train_df['ID'].to_list()
     val_ids = val_df['ID'].to_list()
     test_ids = test_df['ID'].to_list()
@@ -218,7 +218,7 @@ if __name__ == '__main__':
                     model = ECGSMARTNET().to(device)
                     wandb.init(project='ecgsmartnet-cad', 
                                config={'model': 'ECGSMARTNET', 
-                                       'outcome': selected_outcome, 
+                                       'outcome': 'CAD', 
                                        'num_epochs': 200,
                                        'lr epoch0': lr0,
                                        'lr': lr,
@@ -265,7 +265,7 @@ if __name__ == '__main__':
 
                         if val_loss < best_val_loss:
                             best_val_loss = val_loss
-                            torch.save(model, 'models/ecgsmartnet_{}_{}.pt'.format(selected_outcome, current_time))
+                            torch.save(model, 'models/ecgsmartnet_CAD_{}.pt'.format(current_time))
                             wandb.run.summary['best_val_loss'] = val_loss
                             wandb.run.summary['best_val_auc'] = val_auc
                             wandb.run.summary['best_val_ap'] = val_ap
