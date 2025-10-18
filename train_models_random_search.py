@@ -299,7 +299,7 @@ if __name__ == '__main__':
         wd = np.exp(np.random.uniform(np.log(wd_min), np.log(wd_max)))
         
         # Discrete uniform sampling for batch size (powers of 2)
-        bs = np.random.choice(bs_choices)
+        bs = int(np.random.choice(bs_choices))
         
         print(f'\n{"="*80}')
         print(f'RANDOM SEARCH ITERATION: {count_search}/{n_random_search}')
