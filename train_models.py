@@ -171,7 +171,7 @@ def get_data(path):
 
 if __name__ == '__main__':
     # prompt user for path using browse
-    path = '../cad_dataset_preprocessed/'
+    path = 'cad_dataset_preprocessed/'
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     # model = Temporal().to(device)
