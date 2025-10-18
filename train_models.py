@@ -38,7 +38,7 @@ def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, u
             x = x.to(device)
             y = y.to(device)
 
-            with torch.amp.autocast(device.type, enabled=use_amp):
+            with torch.amp.autocast(device_type='cuda', enabled=use_amp):
                 y_pred = model(x)
                 loss = criterion(y_pred, y)
                 y_pred = torch.softmax(y_pred, dim=-1)
@@ -87,7 +87,7 @@ def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
             y = y.to(device)
             x = torch.unsqueeze(x, 1)
 
-            with torch.amp.autocast(device.type, enabled=use_amp):
+            with torch.amp.autocast(device_type='cuda', enabled=use_amp):
                 y_pred = model(x)
                 loss = criterion(y_pred, y)
                 y_pred = torch.softmax(y_pred, dim=-1)
@@ -137,9 +137,9 @@ def get_data(path):
         ecg = ecg['waveforms']['ecg_median']
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
-        max_val = np.max(np.abs(ecg), axis=1)
-        if np.sum(max_val) > 0:
-            ecg = ecg / max_val[:, None]
+        max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
+        max_val = np.where(max_val == 0, 1, max_val)  # Replace zeros with 1
+        ecg = ecg / max_val
         train_data.append(ecg)
     train_data = np.array(train_data)
 
@@ -149,9 +149,9 @@ def get_data(path):
         ecg = ecg['waveforms']['ecg_median']
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
-        max_val = np.max(np.abs(ecg), axis=1)
-        if np.sum(max_val) > 0:
-            ecg = ecg / max_val[:, None]
+        max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
+        max_val = np.where(max_val == 0, 1, max_val)  # Replace zeros with 1
+        ecg = ecg / max_val
         val_data.append(ecg)
     val_data = np.array(val_data)
 
@@ -161,9 +161,9 @@ def get_data(path):
         ecg = ecg['waveforms']['ecg_median']
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
-        max_val = np.max(np.abs(ecg), axis=1)
-        if np.sum(max_val) > 0:
-            ecg = ecg / max_val[:, None]
+        max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
+        max_val = np.where(max_val == 0, 1, max_val)  # Replace zeros with 1
+        ecg = ecg / max_val
         test_data.append(ecg)
     test_data = np.array(test_data)
 
@@ -235,7 +235,7 @@ if __name__ == '__main__':
                     
                     # Only enable mixed precision on GPU
                     use_amp = device.type == 'cuda'
-                    scaler = torch.amp.GradScaler(device=device, enabled=use_amp)
+                    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
                     train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True)
                     val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False)
