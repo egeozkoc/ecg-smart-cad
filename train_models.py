@@ -216,7 +216,7 @@ if __name__ == '__main__':
 
                     current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
                     model = ECGSMARTNET().to(device)
-                    wandb.init(project='ecgsmartnet-final', 
+                    wandb.init(project='ecgsmartnet-cad', 
                                config={'model': 'ECGSMARTNET', 
                                        'outcome': selected_outcome, 
                                        'num_epochs': 200,
