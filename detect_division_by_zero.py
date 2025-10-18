@@ -161,15 +161,6 @@ def visualize_problematic_signals(problematic_files, max_to_show=5):
         fig1, _ = visualize_ecg_grid(file_path, apply_preprocessing=False)
         fig2, _ = visualize_ecg_grid(file_path, apply_preprocessing=True)
         
-        # Add annotation about problematic leads
-        fig1.text(0.5, 0.02, f"[{split.upper()}] Leads with all zeros: {', '.join(zero_leads)}", 
-                 ha='center', fontsize=10, color='red', weight='bold',
-                 bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
-        
-        fig2.text(0.5, 0.02, f"[{split.upper()}] Leads with all zeros (AFTER preprocessing): {', '.join(zero_leads)}", 
-                 ha='center', fontsize=10, color='red', weight='bold',
-                 bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
-        
         plt.tight_layout()
     
     print(f"\nDisplaying {num_to_show} figure pairs (original + preprocessed)...")
