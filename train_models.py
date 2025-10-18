@@ -8,6 +8,7 @@ from scipy import signal
 import pandas as pd
 import wandb
 import time
+import os
 from tkinter.filedialog import askdirectory
 
 def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, use_amp=True):
@@ -172,6 +173,9 @@ def get_data(path):
 if __name__ == '__main__':
     # prompt user for path using browse
     path = 'cad_dataset_preprocessed/'
+    
+    # Create models directory if it doesn't exist
+    os.makedirs('models', exist_ok=True)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     # model = Temporal().to(device)
