@@ -140,10 +140,10 @@ def get_data(path):
         ecg = signal.resample(ecg, 200, axis=1)
         max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
         
-        # Normalize only leads with non-zero max values
-        # Leads with all zeros (disconnected) will remain zero
-        non_zero_mask = max_val != 0
-        ecg[non_zero_mask.flatten()] = ecg[non_zero_mask.flatten()] / max_val[non_zero_mask]
+        # Replace zeros with 1 to avoid division by zero
+        # Disconnected leads (max=0) will remain zero after division (0/1=0)
+        max_val = np.where(max_val == 0, 1, max_val)
+        ecg = ecg / max_val
         
         train_data.append(ecg)
     
@@ -158,10 +158,10 @@ def get_data(path):
         ecg = signal.resample(ecg, 200, axis=1)
         max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
         
-        # Normalize only leads with non-zero max values
-        # Leads with all zeros (disconnected) will remain zero
-        non_zero_mask = max_val != 0
-        ecg[non_zero_mask.flatten()] = ecg[non_zero_mask.flatten()] / max_val[non_zero_mask]
+        # Replace zeros with 1 to avoid division by zero
+        # Disconnected leads (max=0) will remain zero after division (0/1=0)
+        max_val = np.where(max_val == 0, 1, max_val)
+        ecg = ecg / max_val
         
         val_data.append(ecg)
     
@@ -176,10 +176,10 @@ def get_data(path):
         ecg = signal.resample(ecg, 200, axis=1)
         max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
         
-        # Normalize only leads with non-zero max values
-        # Leads with all zeros (disconnected) will remain zero
-        non_zero_mask = max_val != 0
-        ecg[non_zero_mask.flatten()] = ecg[non_zero_mask.flatten()] / max_val[non_zero_mask]
+        # Replace zeros with 1 to avoid division by zero
+        # Disconnected leads (max=0) will remain zero after division (0/1=0)
+        max_val = np.where(max_val == 0, 1, max_val)
+        ecg = ecg / max_val
         
         test_data.append(ecg)
     
