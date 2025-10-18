@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
-from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.metrics import roc_auc_score, average_precision_score, roc_curve, precision_recall_curve
 import joblib
+import matplotlib.pyplot as plt
 
 
 def get_data():
@@ -113,12 +114,53 @@ def evaluate_model():
     print('Test AUC:', auc_test)
     print('Test AP:', ap_test)
     print('='*60)
+    
+    # Plot ROC curves
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # ROC Curve
+    fpr_train, tpr_train, _ = roc_curve(y_train, y_pred_train)
+    fpr_val, tpr_val, _ = roc_curve(y_val, y_pred_val)
+    fpr_test, tpr_test, _ = roc_curve(y_test, y_pred_test)
+    
+    axes[0].plot(fpr_train, tpr_train, label=f'Train (AUC = {auc_train:.3f})', linewidth=2)
+    axes[0].plot(fpr_val, tpr_val, label=f'Validation (AUC = {auc_val:.3f})', linewidth=2)
+    axes[0].plot(fpr_test, tpr_test, label=f'Test (AUC = {auc_test:.3f})', linewidth=2)
+    axes[0].plot([0, 1], [0, 1], 'k--', label='Random Classifier', linewidth=1)
+    axes[0].set_xlabel('False Positive Rate', fontsize=12)
+    axes[0].set_ylabel('True Positive Rate', fontsize=12)
+    axes[0].set_title('ROC Curve', fontsize=14, fontweight='bold')
+    axes[0].legend(loc='lower right', fontsize=10)
+    axes[0].grid(True, alpha=0.3)
+    
+    # Precision-Recall Curve
+    precision_train, recall_train, _ = precision_recall_curve(y_train, y_pred_train)
+    precision_val, recall_val, _ = precision_recall_curve(y_val, y_pred_val)
+    precision_test, recall_test, _ = precision_recall_curve(y_test, y_pred_test)
+    
+    axes[1].plot(recall_train, precision_train, label=f'Train (AP = {ap_train:.3f})', linewidth=2)
+    axes[1].plot(recall_val, precision_val, label=f'Validation (AP = {ap_val:.3f})', linewidth=2)
+    axes[1].plot(recall_test, precision_test, label=f'Test (AP = {ap_test:.3f})', linewidth=2)
+    
+    # Add baseline (random classifier line based on class distribution)
+    baseline_train = np.sum(y_train) / len(y_train)
+    baseline_val = np.sum(y_val) / len(y_val)
+    baseline_test = np.sum(y_test) / len(y_test)
+    axes[1].axhline(y=baseline_test, color='k', linestyle='--', label=f'Random Classifier (Test baseline = {baseline_test:.3f})', linewidth=1)
+    
+    axes[1].set_xlabel('Recall', fontsize=12)
+    axes[1].set_ylabel('Precision', fontsize=12)
+    axes[1].set_title('Precision-Recall Curve', fontsize=14, fontweight='bold')
+    axes[1].legend(loc='best', fontsize=10)
+    axes[1].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
 
 if __name__ == '__main__':
-    # Load the best parameters
-    best_params = np.load('best_params.npy', allow_pickle=True).item()
-    print(best_params)
     
     # Evaluate the model
     evaluate_model()
+
+    
 
