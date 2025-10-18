@@ -118,17 +118,17 @@ def val_epoch(model, device, val_dataloader, criterion):
 
     return val_loss, auc, acc, prec, rec, spec, f1, ap
 
-def get_data(path, selected_outcome):
+def get_data(path):
     
-    train_df = pd.read_csv('../ECG Datasets/ECG SMART Registry/final_code/train_data.csv')
-    val_df = pd.read_csv('../ECG Datasets/ECG SMART Registry/final_code/val_data.csv')
-    test_df = pd.read_csv('../ECG Datasets/ECG SMART Registry/final_code/test_data.csv')
-    train_outcomes = train_df[selected_outcome].to_numpy()
-    val_outcomes = val_df[selected_outcome].to_numpy()
-    test_outcomes = test_df[selected_outcome].to_numpy()
-    train_ids = train_df['id'].to_list()
-    val_ids = val_df['id'].to_list()
-    test_ids = test_df['id'].to_list()
+    train_df = pd.read_csv('train_set.csv')
+    val_df = pd.read_csv('val_set.csv')
+    test_df = pd.read_csv('test_set.csv')
+    train_outcomes = train_df.to_numpy()
+    val_outcomes = val_df.to_numpy()
+    test_outcomes = test_df.to_numpy()
+    train_ids = train_df['ID'].to_list()
+    val_ids = val_df['ID'].to_list()
+    test_ids = test_df['ID'].to_list()
 
     # get train data
     train_data = []
@@ -171,13 +171,12 @@ def get_data(path, selected_outcome):
 
 if __name__ == '__main__':
     # prompt user for path using browse
-    path = '../ECG Datasets/ECG SMART Registry/ecgs/'
-    selected_outcome = 'omi' # 'acs'
+    path = '../cad_dataset_preprocessed/'
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     # model = Temporal().to(device)
 
-    x_train, y_train, x_val, y_val, x_test, y_test = get_data(path, selected_outcome)
+    x_train, y_train, x_val, y_val, x_test, y_test = get_data(path)
 
     # model is pretrained ResNet18 ############################################################################################################
     # model = models.resnet18(weights='DEFAULT')
