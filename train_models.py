@@ -257,7 +257,7 @@ if __name__ == '__main__':
                     
                     # Only enable mixed precision on GPU
                     use_amp = device.type == 'cuda'
-                    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
+                    scaler = torch.amp.GradScaler(enabled=use_amp)
 
                     train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True)
                     val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False)
@@ -265,12 +265,12 @@ if __name__ == '__main__':
                     best_val_loss = np.inf
                     count = 0
                     for epoch in range(num_epochs):
-                        if epoch >= 0:
-                            for param_group in optimizer.param_groups:
-                                param_group['lr'] = lr
-                        else:
+                        if epoch == 0:
                             for param_group in optimizer.param_groups:
                                 param_group['lr'] = lr0
+                        else:
+                            for param_group in optimizer.param_groups:
+                                param_group['lr'] = lr
 
 
                         print(f'Epoch {epoch+1}/{num_epochs}')
