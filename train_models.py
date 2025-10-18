@@ -133,40 +133,76 @@ def get_data(path):
 
     # get train data
     train_data = []
-    for id in train_ids:
+    train_outcomes_filtered = []
+    skipped_train = 0
+    for idx, id in enumerate(train_ids):
         ecg = np.load(path + id + '.npy', allow_pickle=True).item()
         ecg = ecg['waveforms']['ecg_median']
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
         max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
-        max_val = np.where(max_val == 0, 1, max_val)  # Replace zeros with 1
+        
+        # Skip files with zero max values (would cause division by zero)
+        if np.any(max_val == 0):
+            print(f"Skipping train file {id}: contains leads with all zeros")
+            skipped_train += 1
+            continue
+        
         ecg = ecg / max_val
         train_data.append(ecg)
+        train_outcomes_filtered.append(train_outcomes[idx])
+    
     train_data = np.array(train_data)
+    train_outcomes = np.array(train_outcomes_filtered)
+    print(f"Train set: {len(train_data)} files loaded, {skipped_train} files skipped")
 
     val_data = []
-    for id in val_ids:
+    val_outcomes_filtered = []
+    skipped_val = 0
+    for idx, id in enumerate(val_ids):
         ecg = np.load(path + id + '.npy', allow_pickle=True).item()
         ecg = ecg['waveforms']['ecg_median']
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
         max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
-        max_val = np.where(max_val == 0, 1, max_val)  # Replace zeros with 1
+        
+        # Skip files with zero max values (would cause division by zero)
+        if np.any(max_val == 0):
+            print(f"Skipping val file {id}: contains leads with all zeros")
+            skipped_val += 1
+            continue
+        
         ecg = ecg / max_val
         val_data.append(ecg)
+        val_outcomes_filtered.append(val_outcomes[idx])
+    
     val_data = np.array(val_data)
+    val_outcomes = np.array(val_outcomes_filtered)
+    print(f"Val set: {len(val_data)} files loaded, {skipped_val} files skipped")
 
     test_data = []
-    for id in test_ids:
+    test_outcomes_filtered = []
+    skipped_test = 0
+    for idx, id in enumerate(test_ids):
         ecg = np.load(path + id + '.npy', allow_pickle=True).item()
         ecg = ecg['waveforms']['ecg_median']
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
         max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
-        max_val = np.where(max_val == 0, 1, max_val)  # Replace zeros with 1
+        
+        # Skip files with zero max values (would cause division by zero)
+        if np.any(max_val == 0):
+            print(f"Skipping test file {id}: contains leads with all zeros")
+            skipped_test += 1
+            continue
+        
         ecg = ecg / max_val
         test_data.append(ecg)
+        test_outcomes_filtered.append(test_outcomes[idx])
+    
     test_data = np.array(test_data)
+    test_outcomes = np.array(test_outcomes_filtered)
+    print(f"Test set: {len(test_data)} files loaded, {skipped_test} files skipped")
 
     return train_data, train_outcomes, val_data, val_outcomes, test_data, test_outcomes
 
