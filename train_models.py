@@ -10,7 +10,7 @@ import wandb
 import time
 from tkinter.filedialog import askdirectory
 
-def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler):
+def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, use_amp=True):
     train_loss = 0
     total_samples = 0
     model.train()
@@ -38,7 +38,7 @@ def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler):
             x = x.to(device)
             y = y.to(device)
 
-            with torch.amp.autocast(device.type, enabled=True):
+            with torch.amp.autocast(device.type, enabled=use_amp):
                 y_pred = model(x)
                 loss = criterion(y_pred, y)
                 y_pred = torch.softmax(y_pred, dim=-1)
@@ -73,7 +73,7 @@ def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler):
 
     return train_loss, auc, acc, prec, rec, spec, f1, ap
 
-def val_epoch(model, device, val_dataloader, criterion):
+def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
     val_loss = 0
     total_samples = 0
     model.eval()
@@ -87,7 +87,7 @@ def val_epoch(model, device, val_dataloader, criterion):
             y = y.to(device)
             x = torch.unsqueeze(x, 1)
 
-            with torch.amp.autocast(device.type, enabled=True):
+            with torch.amp.autocast(device.type, enabled=use_amp):
                 y_pred = model(x)
                 loss = criterion(y_pred, y)
                 y_pred = torch.softmax(y_pred, dim=-1)
@@ -233,7 +233,9 @@ if __name__ == '__main__':
                     pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
                     val_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device))
                     
-                    scaler = torch.amp.GradScaler(device=device, enabled=True)
+                    # Only enable mixed precision on GPU
+                    use_amp = device.type == 'cuda'
+                    scaler = torch.amp.GradScaler(device=device, enabled=use_amp)
 
                     train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True)
                     val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False)
@@ -250,8 +252,8 @@ if __name__ == '__main__':
 
 
                         print(f'Epoch {epoch+1}/{num_epochs}')
-                        train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(model, device, train_loader, criterion, optimizer, scaler)
-                        val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap = val_epoch(model, device, val_loader, val_criterion)
+                        train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(model, device, train_loader, criterion, optimizer, scaler, use_amp)
+                        val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap = val_epoch(model, device, val_loader, val_criterion, use_amp)
 
                         wandb.log({'Loss/Train': train_loss}, step=epoch)
                         wandb.log({'AUC/Train': train_auc}, step=epoch)
