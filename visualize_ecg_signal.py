@@ -49,9 +49,6 @@ def visualize_ecg(file_path, apply_preprocessing=False):
         # Check if lead has all zeros
         if np.all(ecg_to_plot[i] == 0):
             ax.plot(sample_axis, ecg_to_plot[i], 'r-', linewidth=1.5, alpha=0.7)
-            ax.text(0.5, 0.5, 'LEAD DISCONNECTED', 
-                   transform=ax.transAxes, ha='center', va='center',
-                   fontsize=9, bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.6))
         else:
             ax.plot(sample_axis, ecg_to_plot[i], 'b-', linewidth=1.5)
         
@@ -136,9 +133,6 @@ def visualize_ecg_grid(file_path, apply_preprocessing=False):
             if np.all(ecg_to_plot[lead_idx] == 0):
                 ax.plot(sample_axis, ecg_to_plot[lead_idx], 'r-', linewidth=1.5, alpha=0.7)
                 ax.set_title(f'{lead_name}', fontsize=12, fontweight='bold', color='red')
-                ax.text(0.5, 0.5, 'DISCONNECTED', 
-                       transform=ax.transAxes, ha='center', va='center',
-                       fontsize=9, bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.6))
             else:
                 ax.plot(sample_axis, ecg_to_plot[lead_idx], 'b-', linewidth=1.5)
                 ax.set_title(lead_name, fontsize=12, fontweight='bold')
