@@ -367,20 +367,20 @@ if __name__ == '__main__':
         torch.random.manual_seed(count_search)
         np.random.seed(count_search)
 
-                    current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
-                    model = ECGSMARTNET().to(device)
+        current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
+        model = ECGSMARTNET().to(device)
         wandb.init(project='ecgsmartnet-cad-random-search', 
-                               config={'model': 'ECGSMARTNET', 
-                                       'outcome': 'CAD', 
+                   config={'model': 'ECGSMARTNET', 
+                           'outcome': 'CAD', 
                            'optimizer': 'AdamW',
-                                       'num_epochs': 200,
-                                       'lr epoch0': lr0,
-                                       'lr': lr,
-                                       'bs': bs,
-                                       'weight decay': wd,
-                                       'time': current_time
-                                }
-                    )
+                           'num_epochs': 200,
+                           'lr epoch0': lr0,
+                           'lr': lr,
+                           'bs': bs,
+                           'weight decay': wd,
+                           'time': current_time
+                    }
+        )
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
         criterion = torch.nn.CrossEntropyLoss()
@@ -453,7 +453,7 @@ if __name__ == '__main__':
             print(f'  Validation Loss: {best_val_loss:.4f}')
             print(f'  Model saved to: {global_best_model_path}')
         
-                            wandb.finish()
+        wandb.finish()
     
     # After all hyperparameter search iterations, evaluate ONLY the best model on test set
     print(f'\n{"="*80}')
@@ -574,7 +574,7 @@ if __name__ == '__main__':
     
     plt.close()
     
-                    wandb.finish()
+    wandb.finish()
     
     print(f'\n{"="*80}')
     print('TEST EVALUATION COMPLETE')
