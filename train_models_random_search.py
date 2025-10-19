@@ -1,7 +1,4 @@
 import os
-# Fix OpenMP library conflict on Windows
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
-
 from ecg_models import *
 import numpy as np
 import torch
@@ -14,6 +11,44 @@ import wandb
 import time
 import matplotlib.pyplot as plt
 from tkinter.filedialog import askdirectory
+
+def find_optimal_f1_threshold(y_true, y_pred_proba):
+    """
+    Find the threshold that maximizes F1 score.
+    
+    Args:
+        y_true: True binary labels
+        y_pred_proba: Predicted probabilities for positive class
+    
+    Returns:
+        optimal_threshold: Threshold that maximizes F1
+        optimal_f1: Maximum F1 score achieved
+    """
+    # Get precision, recall, and thresholds
+    precisions, recalls, thresholds = precision_recall_curve(y_true, y_pred_proba)
+    
+    # Calculate F1 score for each threshold
+    # F1 = 2 * (precision * recall) / (precision + recall)
+    # Handle division by zero
+    f1_scores = np.zeros(len(precisions))
+    for i in range(len(precisions)):
+        if precisions[i] + recalls[i] > 0:
+            f1_scores[i] = 2 * (precisions[i] * recalls[i]) / (precisions[i] + recalls[i])
+        else:
+            f1_scores[i] = 0
+    
+    # Find the threshold that maximizes F1
+    optimal_idx = np.argmax(f1_scores)
+    optimal_f1 = f1_scores[optimal_idx]
+    
+    # Handle edge case: precision_recall_curve returns n+1 precision/recall values for n thresholds
+    if optimal_idx < len(thresholds):
+        optimal_threshold = thresholds[optimal_idx]
+    else:
+        # If optimal is at the last index, use a threshold slightly above the last threshold
+        optimal_threshold = thresholds[-1] if len(thresholds) > 0 else 0.5
+    
+    return optimal_threshold, optimal_f1
 
 def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, use_amp=True):
     train_loss = 0
@@ -556,16 +591,46 @@ if __name__ == '__main__':
     # Get validation predictions from best model
     _, val_auc_final, _, _, _, _, _, val_ap_final, y_val_true, y_val_pred = val_epoch(best_model, device, val_loader_final, val_criterion_final, use_amp)
     
-    # Print test metrics
-    print('\nTest Set Results:')
+    # Find optimal F1 threshold on validation set
+    optimal_threshold, optimal_f1_val = find_optimal_f1_threshold(y_val_true, y_val_pred)
+    
+    print(f'\n{"="*80}')
+    print('OPTIMAL THRESHOLD SELECTION (on Validation Set)')
+    print(f'{"="*80}')
+    print(f'  Optimal F1 Threshold: {optimal_threshold:.4f}')
+    print(f'  Validation F1 at optimal threshold: {optimal_f1_val:.3f}')
+    
+    # Recompute validation metrics at optimal threshold
+    val_acc_opt = accuracy_score(y_val_true, y_val_pred >= optimal_threshold)
+    val_prec_opt = precision_score(y_val_true, y_val_pred >= optimal_threshold)
+    val_rec_opt = recall_score(y_val_true, y_val_pred >= optimal_threshold)
+    val_spec_opt = recall_score(y_val_true, y_val_pred >= optimal_threshold, pos_label=0)
+    
+    print(f'  Validation Acc:  {val_acc_opt:.3f}')
+    print(f'  Validation Prec: {val_prec_opt:.3f}')
+    print(f'  Validation Rec:  {val_rec_opt:.3f}')
+    print(f'  Validation Spec: {val_spec_opt:.3f}')
+    
+    # Apply optimal threshold to test set
+    test_acc_opt = accuracy_score(y_test_true, y_test_pred >= optimal_threshold)
+    test_prec_opt = precision_score(y_test_true, y_test_pred >= optimal_threshold)
+    test_rec_opt = recall_score(y_test_true, y_test_pred >= optimal_threshold)
+    test_spec_opt = recall_score(y_test_true, y_test_pred >= optimal_threshold, pos_label=0)
+    test_f1_opt = f1_score(y_test_true, y_test_pred >= optimal_threshold)
+    
+    # Print test metrics with optimal threshold
+    print(f'\n{"="*80}')
+    print('TEST SET RESULTS (using optimal F1 threshold)')
+    print(f'{"="*80}')
+    print(f'  Threshold used: {optimal_threshold:.4f}')
     print(f'  Loss: {test_loss:.3f}')
     print(f'  AUC:  {test_auc:.3f}')
     print(f'  AP:   {test_ap:.3f}')
-    print(f'  Acc:  {test_acc:.3f}')
-    print(f'  Prec: {test_prec:.3f}')
-    print(f'  Rec:  {test_rec:.3f}')
-    print(f'  Spec: {test_spec:.3f}')
-    print(f'  F1:   {test_f1:.3f}')
+    print(f'  Acc:  {test_acc_opt:.3f}')
+    print(f'  Prec: {test_prec_opt:.3f}')
+    print(f'  Rec:  {test_rec_opt:.3f}')
+    print(f'  Spec: {test_spec_opt:.3f}')
+    print(f'  F1:   {test_f1_opt:.3f}')
     
     # Create final wandb run for test evaluation
     wandb.init(project='ecgsmartnet-cad-random-search', 
@@ -578,49 +643,84 @@ if __name__ == '__main__':
                    **global_best_hyperparams
                })
     
-    # Log test metrics to wandb
+    # Log test metrics to wandb (using optimal threshold)
     wandb.log({'Test/Loss': test_loss})
     wandb.log({'Test/AUC': test_auc})
     wandb.log({'Test/AP': test_ap})
-    wandb.log({'Test/Accuracy': test_acc})
-    wandb.log({'Test/Precision': test_prec})
-    wandb.log({'Test/Recall': test_rec})
-    wandb.log({'Test/Specificity': test_spec})
-    wandb.log({'Test/F1': test_f1})
+    wandb.log({'Test/Optimal_Threshold': optimal_threshold})
+    wandb.log({'Test/Accuracy': test_acc_opt})
+    wandb.log({'Test/Precision': test_prec_opt})
+    wandb.log({'Test/Recall': test_rec_opt})
+    wandb.log({'Test/Specificity': test_spec_opt})
+    wandb.log({'Test/F1': test_f1_opt})
+    
+    # Log validation metrics at optimal threshold
+    wandb.log({'Validation/Optimal_F1': optimal_f1_val})
+    wandb.log({'Validation/Accuracy_at_optimal': val_acc_opt})
+    wandb.log({'Validation/Precision_at_optimal': val_prec_opt})
+    wandb.log({'Validation/Recall_at_optimal': val_rec_opt})
+    wandb.log({'Validation/Specificity_at_optimal': val_spec_opt})
     
     wandb.run.summary['test_auc'] = test_auc
     wandb.run.summary['test_ap'] = test_ap
+    wandb.run.summary['optimal_threshold'] = optimal_threshold
+    wandb.run.summary['test_f1_optimal'] = test_f1_opt
     
     # Plot ROC and PR curves
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
     
     # ROC Curve
-    fpr_val, tpr_val, _ = roc_curve(y_val_true, y_val_pred)
-    fpr_test, tpr_test, _ = roc_curve(y_test_true, y_test_pred)
+    fpr_val, tpr_val, thresholds_roc_val = roc_curve(y_val_true, y_val_pred)
+    fpr_test, tpr_test, thresholds_roc_test = roc_curve(y_test_true, y_test_pred)
     
     ax1.plot(fpr_val, tpr_val, 'b-', linewidth=2, label=f'Validation (AUC={val_auc_final:.3f})')
     ax1.plot(fpr_test, tpr_test, 'r-', linewidth=2, label=f'Test (AUC={test_auc:.3f})')
     ax1.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random')
+    
+    # Mark the optimal threshold point on validation curve
+    idx_val = np.argmin(np.abs(thresholds_roc_val - optimal_threshold))
+    ax1.plot(fpr_val[idx_val], tpr_val[idx_val], 'b*', markersize=15, 
+             label=f'Optimal Threshold (Val)', markeredgecolor='black', markeredgewidth=1)
+    
+    # Mark the optimal threshold point on test curve
+    idx_test = np.argmin(np.abs(thresholds_roc_test - optimal_threshold))
+    ax1.plot(fpr_test[idx_test], tpr_test[idx_test], 'r*', markersize=15, 
+             label=f'Optimal Threshold (Test)', markeredgecolor='black', markeredgewidth=1)
+    
     ax1.set_xlabel('False Positive Rate', fontsize=12, fontweight='bold')
     ax1.set_ylabel('True Positive Rate', fontsize=12, fontweight='bold')
     ax1.set_title('ROC Curve', fontsize=14, fontweight='bold')
-    ax1.legend(loc='lower right', fontsize=10)
+    ax1.legend(loc='lower right', fontsize=9)
     ax1.grid(True, alpha=0.3)
     
     # Precision-Recall Curve
-    prec_val, rec_val, _ = precision_recall_curve(y_val_true, y_val_pred)
-    prec_test, rec_test, _ = precision_recall_curve(y_test_true, y_test_pred)
+    prec_val, rec_val, thresholds_pr_val = precision_recall_curve(y_val_true, y_val_pred)
+    prec_test, rec_test, thresholds_pr_test = precision_recall_curve(y_test_true, y_test_pred)
     
     ax2.plot(rec_val, prec_val, 'b-', linewidth=2, label=f'Validation (AP={val_ap_final:.3f})')
     ax2.plot(rec_test, prec_test, 'r-', linewidth=2, label=f'Test (AP={test_ap:.3f})')
+    
+    # Mark the optimal threshold point on validation PR curve
+    if len(thresholds_pr_val) > 0:
+        idx_val_pr = np.argmin(np.abs(thresholds_pr_val - optimal_threshold))
+        ax2.plot(rec_val[idx_val_pr], prec_val[idx_val_pr], 'b*', markersize=15,
+                 label=f'Optimal Threshold (Val)', markeredgecolor='black', markeredgewidth=1)
+    
+    # Mark the optimal threshold point on test PR curve
+    if len(thresholds_pr_test) > 0:
+        idx_test_pr = np.argmin(np.abs(thresholds_pr_test - optimal_threshold))
+        ax2.plot(rec_test[idx_test_pr], prec_test[idx_test_pr], 'r*', markersize=15,
+                 label=f'Optimal Threshold (Test)', markeredgecolor='black', markeredgewidth=1)
+    
     ax2.set_xlabel('Recall', fontsize=12, fontweight='bold')
     ax2.set_ylabel('Precision', fontsize=12, fontweight='bold')
     ax2.set_title('Precision-Recall Curve', fontsize=14, fontweight='bold')
-    ax2.legend(loc='best', fontsize=10)
+    ax2.legend(loc='best', fontsize=9)
     ax2.grid(True, alpha=0.3)
     
-    plt.suptitle(f'Best Model Performance (Iteration {global_best_hyperparams["iteration"]}, lr0={global_best_hyperparams["lr0"]:.2e}, lr={global_best_hyperparams["lr"]:.2e}, bs={global_best_hyperparams["bs"]}, wd={global_best_hyperparams["wd"]:.2e})', 
-                 fontsize=12, fontweight='bold')
+    plt.suptitle(f'Best Model Performance (Iteration {global_best_hyperparams["iteration"]}, Optimal Threshold={optimal_threshold:.3f})\n' + 
+                 f'(lr0={global_best_hyperparams["lr0"]:.2e}, lr={global_best_hyperparams["lr"]:.2e}, bs={global_best_hyperparams["bs"]}, wd={global_best_hyperparams["wd"]:.2e})', 
+                 fontsize=11, fontweight='bold')
     plt.tight_layout()
     
     # Save plot
