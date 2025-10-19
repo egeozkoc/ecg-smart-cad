@@ -242,6 +242,14 @@ if __name__ == '__main__':
     os.makedirs('models', exist_ok=True)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    print(f'\n{"="*80}')
+    print(f'Using device: {device}')
+    if torch.cuda.is_available():
+        print(f'GPU: {torch.cuda.get_device_name(0)}')
+        print(f'GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+    else:
+        print('WARNING: No GPU detected, training will be SLOW on CPU!')
+    print(f'{"="*80}\n')
     # model = Temporal().to(device)
 
     x_train, y_train, x_val, y_val, x_test, y_test = get_data(path)
@@ -311,8 +319,10 @@ if __name__ == '__main__':
                     use_amp = device.type == 'cuda'
                     scaler = torch.amp.GradScaler(enabled=use_amp)
 
-                    train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True)
-                    val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False)
+                    train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True,
+                                             num_workers=4, pin_memory=True, persistent_workers=True)
+                    val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False,
+                                           num_workers=2, pin_memory=True, persistent_workers=True)
 
                     best_val_loss = np.inf
                     count = 0
@@ -396,10 +406,12 @@ if __name__ == '__main__':
     
     # Create test dataloader
     test_dataset = TensorDataset(x_test, y_test)
-    test_loader = DataLoader(test_dataset, batch_size=global_best_hyperparams['bs'], shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=global_best_hyperparams['bs'], shuffle=False,
+                            num_workers=2, pin_memory=True)
     
     # Create validation dataloader with best batch size
-    val_loader_final = DataLoader(val_dataset, batch_size=global_best_hyperparams['bs'], shuffle=False)
+    val_loader_final = DataLoader(val_dataset, batch_size=global_best_hyperparams['bs'], shuffle=False,
+                                  num_workers=2, pin_memory=True)
     
     # Recreate criterion with best hyperparameters
     criterion_final = torch.nn.CrossEntropyLoss()
