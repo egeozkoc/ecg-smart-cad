@@ -50,12 +50,22 @@ def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, u
 
             optimizer.zero_grad()
             scaler.scale(loss).backward()
+            
+            # Unscale gradients and clip them to prevent exploding gradients (NaN issue)
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             scaler.step(optimizer)
             scaler.update()
 
             batch_size = y.size(0)
             train_loss += loss.item() * batch_size
             total_samples += batch_size
+
+            # Check for NaN in loss
+            if torch.isnan(loss):
+                print("WARNING: NaN detected in training loss! Skipping batch.")
+                continue
 
             y_pred = y_pred.cpu().detach().numpy()
             y = y.cpu().detach().numpy()
@@ -67,6 +77,14 @@ def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, u
     train_loss /= total_samples
 
     y_pred = y_pred[:, 1]
+    
+    # Check for NaN/Inf in predictions
+    if np.any(np.isnan(y_pred)) or np.any(np.isinf(y_pred)):
+        print("ERROR: NaN or Inf detected in predictions!")
+        print(f"  NaN count: {np.sum(np.isnan(y_pred))}")
+        print(f"  Inf count: {np.sum(np.isinf(y_pred))}")
+        # Replace NaN/Inf with 0.5 (neutral prediction) to allow training to continue
+        y_pred = np.nan_to_num(y_pred, nan=0.5, posinf=1.0, neginf=0.0)
 
     auc = roc_auc_score(y, y_pred)
     ap = average_precision_score(y, y_pred)
@@ -112,6 +130,14 @@ def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
     val_loss /= total_samples
 
     y_pred = y_pred[:, 1]
+    
+    # Check for NaN/Inf in validation predictions
+    if np.any(np.isnan(y_pred)) or np.any(np.isinf(y_pred)):
+        print("ERROR: NaN or Inf detected in VALIDATION predictions!")
+        print(f"  NaN count: {np.sum(np.isnan(y_pred))}")
+        print(f"  Inf count: {np.sum(np.isinf(y_pred))}")
+        # Replace NaN/Inf with 0.5 (neutral prediction)
+        y_pred = np.nan_to_num(y_pred, nan=0.5, posinf=1.0, neginf=0.0)
 
     auc = roc_auc_score(y, y_pred)
     ap = average_precision_score(y, y_pred)
@@ -157,6 +183,13 @@ def test_epoch(model, device, test_dataloader, criterion, use_amp=True):
     test_loss /= total_samples
 
     y_pred = y_pred[:, 1]
+    
+    # Check for NaN/Inf in test predictions
+    if np.any(np.isnan(y_pred)) or np.any(np.isinf(y_pred)):
+        print("ERROR: NaN or Inf detected in TEST predictions!")
+        print(f"  NaN count: {np.sum(np.isnan(y_pred))}")
+        print(f"  Inf count: {np.sum(np.isinf(y_pred))}")
+        y_pred = np.nan_to_num(y_pred, nan=0.5, posinf=1.0, neginf=0.0)
 
     auc = roc_auc_score(y, y_pred)
     ap = average_precision_score(y, y_pred)
