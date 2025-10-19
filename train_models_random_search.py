@@ -58,19 +58,24 @@ def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, u
             scaler.step(optimizer)
             scaler.update()
 
-            batch_size = y.size(0)
-            train_loss += loss.item() * batch_size
-            total_samples += batch_size
-
-            # Check for NaN in loss
+            # Check for NaN in loss BEFORE accumulating metrics
             if torch.isnan(loss):
                 print("WARNING: NaN detected in training loss! Skipping batch.")
                 continue
+
+            batch_size = y.size(0)
+            train_loss += loss.item() * batch_size
+            total_samples += batch_size
 
             y_pred = y_pred.cpu().detach().numpy()
             y = y.cpu().detach().numpy()
             ys.append(y)
             y_preds.append(y_pred)
+
+    # Safeguard against empty lists (all batches had NaN)
+    if len(ys) == 0 or len(y_preds) == 0:
+        print("ERROR: All training batches were skipped due to NaN! Returning dummy metrics.")
+        return np.inf, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
     y = np.concatenate(ys, axis=0)
     y_pred = np.concatenate(y_preds, axis=0)
@@ -125,6 +130,11 @@ def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
             ys.append(y)
             y_preds.append(y_pred)
 
+    # Safeguard against empty lists
+    if len(ys) == 0 or len(y_preds) == 0:
+        print("ERROR: All validation batches were empty! Returning dummy metrics.")
+        return np.inf, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, np.array([]), np.array([])
+
     y = np.concatenate(ys, axis=0)
     y_pred = np.concatenate(y_preds, axis=0)
     val_loss /= total_samples
@@ -177,6 +187,11 @@ def test_epoch(model, device, test_dataloader, criterion, use_amp=True):
 
             ys.append(y)
             y_preds.append(y_pred)
+
+    # Safeguard against empty lists
+    if len(ys) == 0 or len(y_preds) == 0:
+        print("ERROR: All test batches were empty! Returning dummy metrics.")
+        return np.inf, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, np.array([]), np.array([])
 
     y = np.concatenate(ys, axis=0)
     y_pred = np.concatenate(y_preds, axis=0)
@@ -321,7 +336,7 @@ if __name__ == '__main__':
     n_random_search = 100
     
     # ============= CHANGE THIS TO RESUME FROM SPECIFIC ITERATION =============
-    start_iteration = 9  # Set to 1 to start from beginning, or higher to resume
+    start_iteration = 1  # Set to 1 to start from beginning, or higher to resume
     # ==========================================================================
     
     # Track best model across all hyperparameter configurations
@@ -341,7 +356,11 @@ if __name__ == '__main__':
     for count_search in range(1, n_random_search + 1):
         # Skip iterations before start_iteration
         if count_search < start_iteration:
-                        continue
+            continue
+        
+        # Set seed for reproducible hyperparameter sampling
+        # This ensures same hyperparameters are sampled for each iteration number
+        np.random.seed(count_search * 42)  # Unique seed per iteration
         
         # Sample hyperparameters from continuous distributions
         # Log-uniform sampling: better for hyperparameters spanning orders of magnitude
@@ -363,102 +382,142 @@ if __name__ == '__main__':
         print(f'  weight decay:  {wd:.6e}')
         print(f'{"="*80}\n')
         
-        # Set random seeds for reproducibility of this specific run
-        torch.random.manual_seed(count_search)
-        np.random.seed(count_search)
+        try:
+            # Set random seeds for reproducibility of this specific run
+            torch.random.manual_seed(count_search)
+            np.random.seed(count_search)
 
-        current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
-        model = ECGSMARTNET().to(device)
-        wandb.init(project='ecgsmartnet-cad-random-search', 
-                   config={'model': 'ECGSMARTNET', 
-                           'outcome': 'CAD', 
-                           'optimizer': 'AdamW',
-                           'num_epochs': 200,
-                           'lr epoch0': lr0,
-                           'lr': lr,
-                           'bs': bs,
-                           'weight decay': wd,
-                           'time': current_time
-                    }
-        )
+            current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
+            model = ECGSMARTNET().to(device)
+            wandb.init(project='ecgsmartnet-cad-random-search', 
+                       config={'model': 'ECGSMARTNET', 
+                               'outcome': 'CAD', 
+                               'optimizer': 'AdamW',
+                               'num_epochs': 200,
+                               'lr epoch0': lr0,
+                               'lr': lr,
+                               'bs': bs,
+                               'weight decay': wd,
+                               'time': current_time
+                        }
+            )
 
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
-        criterion = torch.nn.CrossEntropyLoss()
-        pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
-        val_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device))
-        
-        # Only enable mixed precision on GPU
-        use_amp = device.type == 'cuda'
-        scaler = torch.amp.GradScaler(enabled=use_amp)
-
-        train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True, 
-                                  num_workers=4, pin_memory=True, persistent_workers=True)
-        val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False,
-                                num_workers=2, pin_memory=True, persistent_workers=True)
-
-        best_val_loss = np.inf
-        count = 0
-        for epoch in range(num_epochs):
-            if epoch == 0:
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = lr0
-            else:
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = lr
-
-
-            print(f'Epoch {epoch+1}/{num_epochs}')
-            train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(model, device, train_loader, criterion, optimizer, scaler, use_amp)
-            val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap, _, _ = val_epoch(model, device, val_loader, val_criterion, use_amp)
-
-            wandb.log({'Loss/Train': train_loss}, step=epoch)
-            wandb.log({'AUC/Train': train_auc}, step=epoch)
-            wandb.log({'AP/Train': train_ap}, step=epoch)
-            wandb.log({'Loss/Validation': val_loss}, step=epoch)
-            wandb.log({'AUC/Validation': val_auc}, step=epoch)
-            wandb.log({'AP/Validation': val_ap}, step=epoch)
-
-            print('Train Loss: {:.3f}, Train AUC: {:.3f}, Train AP: {:.3f}, Train Acc: {:.3f}, Train Prec: {:.3f}, Train Rec: {:.3f}, Train Spec: {:.3f}, Train F1: {:.3f}'.format(train_loss, train_auc, train_ap, train_acc, train_prec, train_rec, train_spec, train_f1))
-            print('Val Loss: {:.3f}, Val AUC: {:.3f}, Val AP: {:.3f}, Val Acc: {:.3f}, Val Prec: {:.3f}, Val Rec: {:.3f}, Val Spec: {:.3f}, Val F1: {:.3f}'.format(val_loss, val_auc, val_ap, val_acc, val_prec, val_rec, val_spec, val_f1))
-
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                torch.save(model, 'models/ecgsmartnet_CAD_random_{}.pt'.format(current_time))
-                wandb.run.summary['best_val_loss'] = val_loss
-                wandb.run.summary['best_val_auc'] = val_auc
-                wandb.run.summary['best_val_ap'] = val_ap
-                wandb.run.summary['best_epoch'] = epoch
-                count = 0
-            else:
-                count +=1
+            optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
+            criterion = torch.nn.CrossEntropyLoss()
+            pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
+            val_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device))
             
-            if count == 10:
-                break
-        
-        # Check if this is the best model overall across all hyperparameter configurations
-        if best_val_loss < global_best_val_loss:
-            global_best_val_loss = best_val_loss
-            global_best_model_path = 'models/ecgsmartnet_CAD_random_{}.pt'.format(current_time)
-            global_best_hyperparams = {
-                'lr0': lr0,
-                'lr': lr,
-                'bs': bs,
-                'wd': wd,
-                'val_loss': best_val_loss,
-                'val_auc': wandb.run.summary['best_val_auc'],
-                'val_ap': wandb.run.summary['best_val_ap'],
-                'time': current_time
-            }
-            print(f'\n*** NEW BEST MODEL FOUND! ***')
-            print(f'  Validation Loss: {best_val_loss:.4f}')
-            print(f'  Model saved to: {global_best_model_path}')
-        
-        wandb.finish()
+            # Only enable mixed precision on GPU
+            use_amp = device.type == 'cuda'
+            scaler = torch.amp.GradScaler(enabled=use_amp)
+
+            train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True, 
+                                      num_workers=4, pin_memory=True, persistent_workers=True)
+            val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False,
+                                    num_workers=2, pin_memory=True, persistent_workers=True)
+
+            best_val_loss = np.inf
+            count = 0
+            for epoch in range(num_epochs):
+                if epoch == 0:
+                    for param_group in optimizer.param_groups:
+                        param_group['lr'] = lr0
+                else:
+                    for param_group in optimizer.param_groups:
+                        param_group['lr'] = lr
+
+
+                print(f'Epoch {epoch+1}/{num_epochs}')
+                train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(model, device, train_loader, criterion, optimizer, scaler, use_amp)
+                val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap, _, _ = val_epoch(model, device, val_loader, val_criterion, use_amp)
+
+                wandb.log({'Loss/Train': train_loss}, step=epoch)
+                wandb.log({'AUC/Train': train_auc}, step=epoch)
+                wandb.log({'AP/Train': train_ap}, step=epoch)
+                wandb.log({'Loss/Validation': val_loss}, step=epoch)
+                wandb.log({'AUC/Validation': val_auc}, step=epoch)
+                wandb.log({'AP/Validation': val_ap}, step=epoch)
+
+                print('Train Loss: {:.3f}, Train AUC: {:.3f}, Train AP: {:.3f}, Train Acc: {:.3f}, Train Prec: {:.3f}, Train Rec: {:.3f}, Train Spec: {:.3f}, Train F1: {:.3f}'.format(train_loss, train_auc, train_ap, train_acc, train_prec, train_rec, train_spec, train_f1))
+                print('Val Loss: {:.3f}, Val AUC: {:.3f}, Val AP: {:.3f}, Val Acc: {:.3f}, Val Prec: {:.3f}, Val Rec: {:.3f}, Val Spec: {:.3f}, Val F1: {:.3f}'.format(val_loss, val_auc, val_ap, val_acc, val_prec, val_rec, val_spec, val_f1))
+
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    model_filename = 'models/ecgsmartnet_CAD_random_iter{:03d}_{}.pt'.format(count_search, current_time)
+                    torch.save(model, model_filename)
+                    wandb.run.summary['best_val_loss'] = val_loss
+                    wandb.run.summary['best_val_auc'] = val_auc
+                    wandb.run.summary['best_val_ap'] = val_ap
+                    wandb.run.summary['best_epoch'] = epoch
+                    count = 0
+                else:
+                    count +=1
+                
+                if count == 10:
+                    break
+            
+            # Check if this is the best model overall across all hyperparameter configurations
+            if best_val_loss < global_best_val_loss:
+                global_best_val_loss = best_val_loss
+                global_best_model_path = model_filename
+                global_best_hyperparams = {
+                    'lr0': lr0,
+                    'lr': lr,
+                    'bs': bs,
+                    'wd': wd,
+                    'val_loss': best_val_loss,
+                    'val_auc': wandb.run.summary['best_val_auc'],
+                    'val_ap': wandb.run.summary['best_val_ap'],
+                    'time': current_time,
+                    'iteration': count_search
+                }
+                print(f'\n*** NEW BEST MODEL FOUND! ***')
+                print(f'  Iteration: {count_search}/{n_random_search}')
+                print(f'  Validation Loss: {best_val_loss:.4f}')
+                print(f'  Model saved to: {global_best_model_path}')
+            
+            wandb.finish()
+            
+            # Memory cleanup - free GPU memory
+            del model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+        except Exception as e:
+            print(f'\n!!! ERROR in iteration {count_search} !!!')
+            print(f'Error type: {type(e).__name__}')
+            print(f'Error message: {str(e)}')
+            print('Skipping this configuration and continuing search...\n')
+            
+            # Try to clean up and finish wandb
+            try:
+                wandb.finish()
+            except:
+                pass
+            
+            # Try to free memory
+            try:
+                if 'model' in locals():
+                    del model
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except:
+                pass
+            
+            continue
     
     # After all hyperparameter search iterations, evaluate ONLY the best model on test set
     print(f'\n{"="*80}')
     print('HYPERPARAMETER SEARCH COMPLETE')
     print(f'{"="*80}')
+    
+    # Check if any model was successfully trained
+    if global_best_model_path is None or global_best_hyperparams is None:
+        print('\n!!! ERROR: No models were successfully trained during the search !!!')
+        print('All iterations may have failed. Check the error messages above.')
+        print('Exiting without test evaluation.')
+        exit(1)
+    
     print(f'\nBest model details:')
     print(f'  Validation Loss: {global_best_hyperparams["val_loss"]:.4f}')
     print(f'  Validation AUC:  {global_best_hyperparams["val_auc"]:.3f}')
@@ -560,12 +619,12 @@ if __name__ == '__main__':
     ax2.legend(loc='best', fontsize=10)
     ax2.grid(True, alpha=0.3)
     
-    plt.suptitle(f'Best Model Performance (lr0={global_best_hyperparams["lr0"]:.2e}, lr={global_best_hyperparams["lr"]:.2e}, bs={global_best_hyperparams["bs"]}, wd={global_best_hyperparams["wd"]:.2e})', 
+    plt.suptitle(f'Best Model Performance (Iteration {global_best_hyperparams["iteration"]}, lr0={global_best_hyperparams["lr0"]:.2e}, lr={global_best_hyperparams["lr"]:.2e}, bs={global_best_hyperparams["bs"]}, wd={global_best_hyperparams["wd"]:.2e})', 
                  fontsize=12, fontweight='bold')
     plt.tight_layout()
     
     # Save plot
-    plot_path = f'models/ecgsmartnet_CAD_random_BEST_MODEL_{global_best_hyperparams["time"]}_curves.png'
+    plot_path = f'models/ecgsmartnet_CAD_random_BEST_MODEL_iter{global_best_hyperparams["iteration"]:03d}_{global_best_hyperparams["time"]}_curves.png'
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     print(f'\nPlots saved to: {plot_path}')
     
