@@ -341,7 +341,7 @@ if __name__ == '__main__':
     for count_search in range(1, n_random_search + 1):
         # Skip iterations before start_iteration
         if count_search < start_iteration:
-            continue
+                        continue
         
         # Sample hyperparameters from continuous distributions
         # Log-uniform sampling: better for hyperparameters spanning orders of magnitude
@@ -367,8 +367,8 @@ if __name__ == '__main__':
         torch.random.manual_seed(count_search)
         np.random.seed(count_search)
 
-        current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
-        model = ECGSMARTNET().to(device)
+                    current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
+                    model = ECGSMARTNET().to(device)
         wandb.init(project='ecgsmartnet-cad-random-search', 
                                config={'model': 'ECGSMARTNET', 
                                        'outcome': 'CAD', 
@@ -383,56 +383,56 @@ if __name__ == '__main__':
                     )
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
-                    criterion = torch.nn.CrossEntropyLoss()
-                    pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
-                    val_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device))
-                    
-                    # Only enable mixed precision on GPU
-                    use_amp = device.type == 'cuda'
-                    scaler = torch.amp.GradScaler(enabled=use_amp)
+        criterion = torch.nn.CrossEntropyLoss()
+        pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
+        val_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device))
+        
+        # Only enable mixed precision on GPU
+        use_amp = device.type == 'cuda'
+        scaler = torch.amp.GradScaler(enabled=use_amp)
 
         train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True, 
                                   num_workers=4, pin_memory=True, persistent_workers=True)
         val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False,
                                 num_workers=2, pin_memory=True, persistent_workers=True)
 
-                    best_val_loss = np.inf
-                    count = 0
-                    for epoch in range(num_epochs):
-                        if epoch == 0:
-                            for param_group in optimizer.param_groups:
-                                param_group['lr'] = lr0
-                        else:
-                            for param_group in optimizer.param_groups:
-                                param_group['lr'] = lr
+        best_val_loss = np.inf
+        count = 0
+        for epoch in range(num_epochs):
+            if epoch == 0:
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = lr0
+            else:
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = lr
 
 
-                        print(f'Epoch {epoch+1}/{num_epochs}')
-                        train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(model, device, train_loader, criterion, optimizer, scaler, use_amp)
+            print(f'Epoch {epoch+1}/{num_epochs}')
+            train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(model, device, train_loader, criterion, optimizer, scaler, use_amp)
             val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap, _, _ = val_epoch(model, device, val_loader, val_criterion, use_amp)
 
-                        wandb.log({'Loss/Train': train_loss}, step=epoch)
-                        wandb.log({'AUC/Train': train_auc}, step=epoch)
-                        wandb.log({'AP/Train': train_ap}, step=epoch)
-                        wandb.log({'Loss/Validation': val_loss}, step=epoch)
-                        wandb.log({'AUC/Validation': val_auc}, step=epoch)
-                        wandb.log({'AP/Validation': val_ap}, step=epoch)
+            wandb.log({'Loss/Train': train_loss}, step=epoch)
+            wandb.log({'AUC/Train': train_auc}, step=epoch)
+            wandb.log({'AP/Train': train_ap}, step=epoch)
+            wandb.log({'Loss/Validation': val_loss}, step=epoch)
+            wandb.log({'AUC/Validation': val_auc}, step=epoch)
+            wandb.log({'AP/Validation': val_ap}, step=epoch)
 
-                        print('Train Loss: {:.3f}, Train AUC: {:.3f}, Train AP: {:.3f}, Train Acc: {:.3f}, Train Prec: {:.3f}, Train Rec: {:.3f}, Train Spec: {:.3f}, Train F1: {:.3f}'.format(train_loss, train_auc, train_ap, train_acc, train_prec, train_rec, train_spec, train_f1))
-                        print('Val Loss: {:.3f}, Val AUC: {:.3f}, Val AP: {:.3f}, Val Acc: {:.3f}, Val Prec: {:.3f}, Val Rec: {:.3f}, Val Spec: {:.3f}, Val F1: {:.3f}'.format(val_loss, val_auc, val_ap, val_acc, val_prec, val_rec, val_spec, val_f1))
+            print('Train Loss: {:.3f}, Train AUC: {:.3f}, Train AP: {:.3f}, Train Acc: {:.3f}, Train Prec: {:.3f}, Train Rec: {:.3f}, Train Spec: {:.3f}, Train F1: {:.3f}'.format(train_loss, train_auc, train_ap, train_acc, train_prec, train_rec, train_spec, train_f1))
+            print('Val Loss: {:.3f}, Val AUC: {:.3f}, Val AP: {:.3f}, Val Acc: {:.3f}, Val Prec: {:.3f}, Val Rec: {:.3f}, Val Spec: {:.3f}, Val F1: {:.3f}'.format(val_loss, val_auc, val_ap, val_acc, val_prec, val_rec, val_spec, val_f1))
 
-                        if val_loss < best_val_loss:
-                            best_val_loss = val_loss
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
                 torch.save(model, 'models/ecgsmartnet_CAD_random_{}.pt'.format(current_time))
-                            wandb.run.summary['best_val_loss'] = val_loss
-                            wandb.run.summary['best_val_auc'] = val_auc
-                            wandb.run.summary['best_val_ap'] = val_ap
-                            wandb.run.summary['best_epoch'] = epoch
-                            count = 0
-                        else:
-                            count +=1
-                        
-                        if count == 10:
+                wandb.run.summary['best_val_loss'] = val_loss
+                wandb.run.summary['best_val_auc'] = val_auc
+                wandb.run.summary['best_val_ap'] = val_ap
+                wandb.run.summary['best_epoch'] = epoch
+                count = 0
+            else:
+                count +=1
+            
+            if count == 10:
                 break
         
         # Check if this is the best model overall across all hyperparameter configurations
