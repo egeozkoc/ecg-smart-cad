@@ -1,3 +1,7 @@
+import os
+# Fix OpenMP library conflict on Windows
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
 from ecg_models import *
 import numpy as np
 import torch
@@ -8,7 +12,6 @@ from scipy import signal
 import pandas as pd
 import wandb
 import time
-import os
 import matplotlib.pyplot as plt
 from tkinter.filedialog import askdirectory
 
