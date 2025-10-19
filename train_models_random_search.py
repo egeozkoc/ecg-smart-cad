@@ -341,7 +341,8 @@ if __name__ == '__main__':
     for count_search in range(1, n_random_search + 1):
         # Skip iterations before start_iteration
         if count_search < start_iteration:
-                        continue
+            continue
+        
         # Sample hyperparameters from continuous distributions
         # Log-uniform sampling: better for hyperparameters spanning orders of magnitude
         # This ensures equal probability in log-space (e.g., 1e-5 to 1e-4 has same 
@@ -366,8 +367,8 @@ if __name__ == '__main__':
         torch.random.manual_seed(count_search)
         np.random.seed(count_search)
 
-                    current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
-                    model = ECGSMARTNET().to(device)
+        current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
+        model = ECGSMARTNET().to(device)
         wandb.init(project='ecgsmartnet-cad-random-search', 
                                config={'model': 'ECGSMARTNET', 
                                        'outcome': 'CAD', 
