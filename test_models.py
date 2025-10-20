@@ -9,8 +9,14 @@ import pandas as pd
 import os
 
 
-def load_split_data(base_path, split):
-    """Load a split's data (val/test/train) for evaluation."""
+def load_split_data(base_path, split, waveform_type='ecg_median'):
+    """Load a split's data (val/test/train) for evaluation.
+    
+    Args:
+        base_path: Path to preprocessed data directory
+        split: 'train', 'val', or 'test'
+        waveform_type: Type of waveform to extract ('ecg_median', 'ecg_10sec_clean', or 'beats')
+    """
     # CSV is in root directory
     split_csv = f'{split}_set.csv'
     df = pd.read_csv(split_csv)
@@ -18,11 +24,30 @@ def load_split_data(base_path, split):
     outcomes = df['label'].to_numpy()
 
     data_list = []
-    for sample_id in ids:
+    outcomes_list = []
+    missing_files = []
+    
+    for idx, sample_id in enumerate(ids):
         # .npy files are in subdirectories under base_path
-        arr = np.load(f'{base_path}/{split}_set/{sample_id}.npy', allow_pickle=True)
-        data_list.append(arr)
-    data = np.array(data_list)
+        file_path = f'{base_path}/{split}_set/{sample_id}.npy'
+        
+        if not os.path.exists(file_path):
+            missing_files.append(sample_id)
+            continue
+            
+        data_dict = np.load(file_path, allow_pickle=True).item()
+        # Extract the waveform data from the nested dictionary
+        waveform = data_dict['waveforms'][waveform_type]
+        data_list.append(waveform)
+        outcomes_list.append(outcomes[idx])
+    
+    if missing_files:
+        print(f"Warning: {len(missing_files)} files missing from {split} set (out of {len(ids)} total)")
+        print(f"Found {len(data_list)} files")
+    
+    # Stack into a single array
+    data = np.stack(data_list, axis=0)
+    outcomes = np.array(outcomes_list)
     return data, outcomes
 
 
