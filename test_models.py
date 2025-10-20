@@ -282,9 +282,9 @@ def main():
     print('=' * 80)
     print('Results for {}'.format(model_path))
     print('-' * 80)
-    print(f"Rule Out Thresh\nSens > 0.90\n{r3(rule_out_thresh):.3f}")
-    print(f"Rule In Thresh\nPPV > 0.85\n{r3(rule_in_thresh):.3f}")
-    print(f"F1 Thresh\n{r3(f1_thresh):.3f}")
+    print(f"Rule Out Thresh\nSens > 0.90\n{r3(rule_out_thresh) if rule_out_thresh is not None else 'N/A'}")
+    print(f"Rule In Thresh\nPPV > 0.85\n{r3(rule_in_thresh) if rule_in_thresh is not None else 'N/A'}")
+    print(f"F1 Thresh\n{r3(f1_thresh) if f1_thresh is not None else 'N/A'}")
 
     print(f"Val AUC\n{format_with_ci(val_metrics['auc'], val_ci['auc'])}")
     print(f"Val AP\n{format_with_ci(val_metrics['ap'], val_ci['ap'])}")
