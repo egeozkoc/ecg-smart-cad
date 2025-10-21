@@ -59,7 +59,7 @@ def evaluate_split(model, device, dataloader, criterion):
     all_pred_probs = []
 
     with torch.no_grad():
-        for (x, y) in dataloader:
+        for batch_idx, (x, y) in enumerate(dataloader):
             x = x.to(device)
             y = y.to(device)
             x = torch.unsqueeze(x, 1)
@@ -75,6 +75,10 @@ def evaluate_split(model, device, dataloader, criterion):
 
             all_pred_probs.append(probs[:, 1].detach().cpu().to(torch.float32).numpy())
             all_y_true.append(y.detach().cpu().numpy())
+            
+            # Print progress every 5 batches
+            if (batch_idx + 1) % 5 == 0:
+                print(f"  Processed {total_samples} samples...", flush=True)
 
     y_true = np.concatenate(all_y_true, axis=0)
     y_prob_pos = np.concatenate(all_pred_probs, axis=0)
