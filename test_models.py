@@ -234,7 +234,7 @@ def plot_confusion_matrix(cm, model_name, save_path):
 
 def main():
     # Define model path in a single line
-    model_path = 'models/ecgsmartnet_CAD_random_iter001_2025-01-01-00-00-00.pt'  # Update this path
+    model_path = 'models/ecgsmartnet_CAD_random_2025-10-18-19-56-03.pt'  # Update this path
 
     # Device
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -274,13 +274,13 @@ def main():
     val_metrics = compute_metrics(y_val_true, y_val_prob, f1_thresh)
     val_ci = bootstrap_ci_val(y_val_true, y_val_prob)
 
-    # Test metrics at 0.5 threshold (to match your table)
-    test_metrics = compute_metrics(y_test_true, y_test_prob, 0.5)
-    test_ci = bootstrap_ci_test(y_test_true, y_test_prob, 0.5)
+    # Test metrics at F1-optimal threshold (from validation set)
+    test_metrics = compute_metrics(y_test_true, y_test_prob, f1_thresh)
+    test_ci = bootstrap_ci_test(y_test_true, y_test_prob, f1_thresh)
 
-    # Confusion matrix at 0.5 threshold
-    test_preds_05 = (y_test_prob >= 0.5).astype(int)
-    cm = confusion_matrix(y_test_true, test_preds_05)
+    # Confusion matrix at F1-optimal threshold
+    test_preds = (y_test_prob >= f1_thresh).astype(int)
+    cm = confusion_matrix(y_test_true, test_preds)
 
     # Print results in requested format (single-column model)
     print('=' * 80)
