@@ -80,6 +80,7 @@ def evaluate_split(model, device, dataloader, criterion):
             if (batch_idx + 1) % 5 == 0:
                 print(f"  Processed {total_samples} samples...", flush=True)
 
+    print(f"  Completed processing {total_samples} samples. Aggregating results...", flush=True)
     y_true = np.concatenate(all_y_true, axis=0)
     y_prob_pos = np.concatenate(all_pred_probs, axis=0)
     avg_loss = total_loss / max(total_samples, 1)
@@ -268,19 +269,30 @@ def main():
     # Evaluate validation and test splits
     print('Evaluating validation set...')
     _, y_val_true, y_val_prob = evaluate_split(model, device, val_loader, criterion)
+    print('✓ Validation evaluation complete')
+    
     print('Evaluating test set...')
     _, y_test_true, y_test_prob = evaluate_split(model, device, test_loader, criterion)
+    print('✓ Test evaluation complete')
     
     # Derive thresholds from validation split
+    print('Finding optimal thresholds...')
     rule_out_thresh, rule_in_thresh, f1_thresh = find_thresholds_from_val(y_val_true, y_val_prob)
+    print(f'✓ Thresholds found (F1 thresh: {f1_thresh:.3f})')
     
     # Compute validation metrics at F1 threshold
+    print('Computing validation metrics...')
     val_metrics = compute_metrics(y_val_true, y_val_prob, f1_thresh)
+    print('Computing validation bootstrap CIs (1000 iterations, may take 1-2 min)...')
     val_ci = bootstrap_ci_val(y_val_true, y_val_prob)
+    print('✓ Validation metrics complete')
 
     # Test metrics at F1-optimal threshold (from validation set)
+    print('Computing test metrics...')
     test_metrics = compute_metrics(y_test_true, y_test_prob, f1_thresh)
+    print('Computing test bootstrap CIs (1000 iterations, may take 1-2 min)...')
     test_ci = bootstrap_ci_test(y_test_true, y_test_prob, f1_thresh)
+    print('✓ Test metrics complete')
 
     # Confusion matrix at F1-optimal threshold
     test_preds = (y_test_prob >= f1_thresh).astype(int)
