@@ -7,47 +7,45 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import os
+from scipy import signal
 
 
-def load_split_data(base_path, split, waveform_type='ecg_median'):
-    """Load a split's data (val/test/train) for evaluation.
+def load_split_data(split):
+    """Load a split's data (train/val/test) for evaluation.
     
     Args:
-        base_path: Path to preprocessed data directory
         split: 'train', 'val', or 'test'
-        waveform_type: Type of waveform to extract ('ecg_median', 'ecg_10sec_clean', or 'beats')
+    
+    Returns:
+        data: numpy array of preprocessed ECG signals
+        outcomes: numpy array of labels
     """
-    # CSV is in root directory
+    # Read CSV for labels
     split_csv = f'{split}_set.csv'
     df = pd.read_csv(split_csv)
     ids = df['ID'].to_list()
     outcomes = df['label'].to_numpy()
 
+    # Load and preprocess data
     data_list = []
-    outcomes_list = []
-    missing_files = []
-    
-    for idx, sample_id in enumerate(ids):
-        # .npy files are in subdirectories under base_path
-        file_path = f'{base_path}/{split}_set/{sample_id}.npy'
+    for sample_id in ids:
+        # Load from the respective folder
+        ecg = np.load(f'cad_dataset_preprocessed/{split}_set/{sample_id}.npy', allow_pickle=True).item()
+        # Extract ECG median from dictionary
+        ecg = ecg['waveforms']['ecg_median']
+        # Slice to remove edges
+        ecg = ecg[:, 150:-50]
+        # Resample to 200 samples
+        ecg = signal.resample(ecg, 200, axis=1)
+        # Normalize by max value (handle division by zero for disconnected leads)
+        max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
+        max_val = np.where(max_val == 0, 1, max_val)  # Replace zeros with 1
+        ecg = ecg / max_val
         
-        if not os.path.exists(file_path):
-            missing_files.append(sample_id)
-            continue
-            
-        data_dict = np.load(file_path, allow_pickle=True).item()
-        # Extract the waveform data from the nested dictionary
-        waveform = data_dict['waveforms'][waveform_type]
-        data_list.append(waveform)
-        outcomes_list.append(outcomes[idx])
+        data_list.append(ecg)
     
-    if missing_files:
-        print(f"Warning: {len(missing_files)} files missing from {split} set (out of {len(ids)} total)")
-        print(f"Found {len(data_list)} files")
-    
-    # Stack into a single array
-    data = np.stack(data_list, axis=0)
-    outcomes = np.array(outcomes_list)
+    data = np.array(data_list)
+    print(f"{split.capitalize()} set: {len(data)} files loaded")
     return data, outcomes
 
 
@@ -217,12 +215,12 @@ def plot_val_test_roc(y_val_true, y_val_prob, y_test_true, y_test_prob, model_na
     print(f"Val+Test ROC curves saved to: {save_path}")
 
 
-def plot_confusion_matrix(cm, model_name, save_path, label='CAD'):
+def plot_confusion_matrix(cm, model_name, save_path):
     """Plot confusion matrix and save it"""
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=[f'No {label}', f'{label}'], 
-                yticklabels=[f'No {label}', f'{label}'])
+                xticklabels=['No CAD', 'CAD'], 
+                yticklabels=['No CAD', 'CAD'])
     plt.title(f'Confusion Matrix - {model_name}')
     plt.ylabel('True Label')
     plt.xlabel('Predicted Label')
@@ -236,14 +234,17 @@ def plot_confusion_matrix(cm, model_name, save_path, label='CAD'):
 
 def main():
     # Define model path in a single line
-    model_path = 'models/ecgsmartnet_CAD_random_2025-10-18-19-56-03.pt'
+    model_path = 'models/ecgsmartnet_CAD_random_iter001_2025-01-01-00-00-00.pt'  # Update this path
 
     # Device
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    print(f'Using device: {device}')
 
-    # Load splits
-    x_val_np, y_val_np = load_split_data('cad_dataset_preprocessed', 'val')
-    x_test_np, y_test_np = load_split_data('cad_dataset_preprocessed', 'test')
+    # Load splits (data is already preprocessed)
+    print('Loading validation data...')
+    x_val_np, y_val_np = load_split_data('val')
+    print('Loading test data...')
+    x_test_np, y_test_np = load_split_data('test')
 
     # Build dataloaders
     x_val = torch.tensor(x_val_np, dtype=torch.float32)
@@ -255,12 +256,15 @@ def main():
     test_loader = DataLoader(TensorDataset(x_test, y_test), batch_size=64, shuffle=False)
 
     # Load model
+    print(f'Loading model from: {model_path}')
     model = torch.load(model_path, map_location=device, weights_only=False)
     model.eval()
     criterion = torch.nn.CrossEntropyLoss()
 
     # Evaluate validation and test splits
+    print('Evaluating validation set...')
     _, y_val_true, y_val_prob = evaluate_split(model, device, val_loader, criterion)
+    print('Evaluating test set...')
     _, y_test_true, y_test_prob = evaluate_split(model, device, test_loader, criterion)
     
     # Derive thresholds from validation split
@@ -270,21 +274,21 @@ def main():
     val_metrics = compute_metrics(y_val_true, y_val_prob, f1_thresh)
     val_ci = bootstrap_ci_val(y_val_true, y_val_prob)
 
-    # Test metrics at F1 threshold (optimized on validation set)
-    test_metrics = compute_metrics(y_test_true, y_test_prob, f1_thresh)
-    test_ci = bootstrap_ci_test(y_test_true, y_test_prob, f1_thresh)
+    # Test metrics at 0.5 threshold (to match your table)
+    test_metrics = compute_metrics(y_test_true, y_test_prob, 0.5)
+    test_ci = bootstrap_ci_test(y_test_true, y_test_prob, 0.5)
 
-    # Confusion matrix at F1 threshold
-    test_preds = (y_test_prob >= f1_thresh).astype(int)
-    cm = confusion_matrix(y_test_true, test_preds)
+    # Confusion matrix at 0.5 threshold
+    test_preds_05 = (y_test_prob >= 0.5).astype(int)
+    cm = confusion_matrix(y_test_true, test_preds_05)
 
     # Print results in requested format (single-column model)
     print('=' * 80)
     print('Results for {}'.format(model_path))
     print('-' * 80)
-    print(f"Rule Out Thresh\nSens > 0.90\n{r3(rule_out_thresh) if rule_out_thresh is not None else 'N/A'}")
-    print(f"Rule In Thresh\nPPV > 0.85\n{r3(rule_in_thresh) if rule_in_thresh is not None else 'N/A'}")
-    print(f"F1 Thresh\n{r3(f1_thresh) if f1_thresh is not None else 'N/A'}")
+    print(f"Rule Out Thresh\nSens > 0.90\n{r3(rule_out_thresh):.3f}")
+    print(f"Rule In Thresh\nPPV > 0.85\n{r3(rule_in_thresh):.3f}")
+    print(f"F1 Thresh\n{r3(f1_thresh):.3f}")
 
     print(f"Val AUC\n{format_with_ci(val_metrics['auc'], val_ci['auc'])}")
     print(f"Val AP\n{format_with_ci(val_metrics['ap'], val_ci['ap'])}")
@@ -307,7 +311,7 @@ def main():
     print('=' * 80)
 
     # Save results and plots
-    os.makedirs('test_results_median_beats', exist_ok=True)
+    os.makedirs('test_results', exist_ok=True)
     model_name = os.path.basename(model_path).replace('.pt', '')
 
     # Save metrics table to CSV in the displayed order, with CI columns (rounded to 3 decimals)
@@ -333,12 +337,13 @@ def main():
         ['Test NPV', r3(test_metrics['npv']), r3(test_ci['npv'][0]), r3(test_ci['npv'][1])],
     ]
     metrics_df = pd.DataFrame(rows, columns=['Metric', 'Value', 'CI_low', 'CI_high'])
-    metrics_df.to_csv(f'test_results_median_beats/{model_name}_results.csv', index=False)
+    metrics_df.to_csv(f'test_results/{model_name}_results.csv', index=False)
+    print(f"Results CSV saved to: test_results/{model_name}_results.csv")
 
     # Save probabilities as .npy files
-    np.save(f'test_results_median_beats/{model_name}_val_probabilities.npy', y_val_prob)
-    np.save(f'test_results_median_beats/{model_name}_test_probabilities.npy', y_test_prob)
-    print(f"Probabilities saved to test_results_median_beats/{model_name}_*_probabilities.npy")
+    np.save(f'test_results/{model_name}_val_probabilities.npy', y_val_prob)
+    np.save(f'test_results/{model_name}_test_probabilities.npy', y_test_prob)
+    print(f"Probabilities saved to test_results/{model_name}_*_probabilities.npy")
 
     # Save plots (combined val+test ROC and confusion matrix)
     plot_val_test_roc(
@@ -347,9 +352,9 @@ def main():
         y_test_true,
         y_test_prob,
         model_name,
-        f'test_results_median_beats/{model_name}_roc.png'
+        f'test_results/{model_name}_roc.png'
     )
-    plot_confusion_matrix(cm, model_name, f'test_results_median_beats/{model_name}_cm.png')
+    plot_confusion_matrix(cm, model_name, f'test_results/{model_name}_cm.png')
 
 if __name__ == '__main__':
     main()
