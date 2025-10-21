@@ -145,7 +145,7 @@ def compute_metrics(y_true, y_prob_pos, threshold):
     }
 
 
-def bootstrap_ci_val(y_true, y_prob_pos, n_boot=1000, seed=42):
+def bootstrap_ci_val(y_true, y_prob_pos, n_boot=200, seed=42):
     """Bootstrap 95% CIs for validation metrics, recomputing F1 threshold per resample."""
     rng = np.random.default_rng(seed)
     metrics = {'auc': [], 'ap': [], 'f1': [], 'sens': [], 'spec': [], 'acc': [], 'ppv': [], 'npv': []}
@@ -165,7 +165,7 @@ def bootstrap_ci_val(y_true, y_prob_pos, n_boot=1000, seed=42):
     return ci
 
 
-def bootstrap_ci_test(y_true, y_prob_pos, threshold=0.5, n_boot=1000, seed=42):
+def bootstrap_ci_test(y_true, y_prob_pos, threshold=0.5, n_boot=200, seed=42):
     """Bootstrap 95% CIs for test metrics at a fixed threshold."""
     rng = np.random.default_rng(seed)
     metrics = {'auc': [], 'ap': [], 'f1': [], 'sens': [], 'spec': [], 'acc': [], 'ppv': [], 'npv': []}
@@ -283,14 +283,14 @@ def main():
     # Compute validation metrics at F1 threshold
     print('Computing validation metrics...')
     val_metrics = compute_metrics(y_val_true, y_val_prob, f1_thresh)
-    print('Computing validation bootstrap CIs (1000 iterations, may take 1-2 min)...')
+    print('Computing validation bootstrap CIs (200 iterations, ~30-60 sec)...')
     val_ci = bootstrap_ci_val(y_val_true, y_val_prob)
     print('✓ Validation metrics complete')
 
     # Test metrics at F1-optimal threshold (from validation set)
     print('Computing test metrics...')
     test_metrics = compute_metrics(y_test_true, y_test_prob, f1_thresh)
-    print('Computing test bootstrap CIs (1000 iterations, may take 1-2 min)...')
+    print('Computing test bootstrap CIs (200 iterations, ~30-60 sec)...')
     test_ci = bootstrap_ci_test(y_test_true, y_test_prob, f1_thresh)
     print('✓ Test metrics complete')
 
