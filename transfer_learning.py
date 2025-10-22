@@ -1,9 +1,11 @@
 """
 Transfer Learning for CAD Detection using Pretrained OMI Model
-Option 1: Feature Extraction (Freeze all layers except final FC layer)
+Option 1 Modified: Feature Extraction + Last Residual Block Fine-tuning
 
 This script loads a pretrained ECGSmartNet model trained on OMI detection
-and fine-tunes only the final layer for CAD detection.
+and fine-tunes layer4 (last residual block) and the final FC layer for CAD detection.
+This provides more adaptation capacity than freezing all except FC, while still
+preserving most of the pretrained features.
 """
 
 import os
@@ -374,8 +376,8 @@ def plot_confusion_matrix(y_true, y_pred, threshold, save_path):
 
 def load_pretrained_model(pretrained_path, device, num_classes=2):
     """
-    Load pretrained model and prepare for transfer learning (Option 1).
-    Freezes all layers except the final FC layer.
+    Load pretrained model and prepare for transfer learning (Option 1 Modified).
+    Freezes all layers except layer4 (last residual block) and final FC layer.
     
     Args:
         pretrained_path: Path to pretrained .pt file
@@ -383,7 +385,7 @@ def load_pretrained_model(pretrained_path, device, num_classes=2):
         num_classes: Number of output classes (default: 2 for binary CAD)
     
     Returns:
-        model: Model with frozen layers and new FC layer
+        model: Model with frozen layers (trainable: layer4 + FC)
         trainable_params: Number of trainable parameters
         total_params: Total number of parameters
     """
@@ -417,18 +419,18 @@ def load_pretrained_model(pretrained_path, device, num_classes=2):
     print(f'✓ Transferred {len(pretrained_dict_filtered)} layers from pretrained model')
     print(f'✓ Final FC layer initialized randomly for CAD detection')
     
-    # FREEZE all layers except final FC layer
+    # FREEZE all layers except layer4 and final FC layer
     print(f'\n{"="*80}')
-    print('FREEZING LAYERS (Feature Extraction Mode)')
+    print('FREEZING LAYERS (Feature Extraction + Last Residual Block)')
     print(f'{"="*80}')
     
     for name, param in model.named_parameters():
-        if 'fc' not in name:
-            param.requires_grad = False
-            print(f'  Frozen: {name}')
-        else:
+        if 'layer4' in name or 'fc' in name:
             param.requires_grad = True
             print(f'  ✓ Trainable: {name}')
+        else:
+            param.requires_grad = False
+            print(f'  Frozen: {name}')
     
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -452,13 +454,13 @@ if __name__ == '__main__':
     # ============================================================
     
     # Path to pretrained OMI model (USER WILL PROVIDE THIS)
-    PRETRAINED_MODEL_PATH = 'path/to/your/omi_model.pt'  # CHANGE THIS
+    PRETRAINED_MODEL_PATH = 'models/ecgsmartnet_base_omi_2025-10-22-16-26-34.pt'  # CHANGE THIS
     
     # Data directory
     DATA_DIR = 'cad_dataset_preprocessed/'
     
-    # Hyperparameters (optimized for fine-tuning final layer only)
-    LEARNING_RATE = 1e-3      # Higher LR for final layer
+    # Hyperparameters (optimized for fine-tuning layer4 + final layer)
+    LEARNING_RATE = 5e-4      # Moderate LR for layer4 + FC layer
     BATCH_SIZE = 64
     WEIGHT_DECAY = 1e-4
     NUM_EPOCHS = 100           # Fewer epochs needed for transfer learning
@@ -478,7 +480,7 @@ if __name__ == '__main__':
     
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'\n{"="*80}')
-    print(f'TRANSFER LEARNING - OPTION 1: FEATURE EXTRACTION')
+    print(f'TRANSFER LEARNING - LAYER4 + FC FINE-TUNING')
     print(f'{"="*80}')
     print(f'Using device: {device}')
     if torch.cuda.is_available():
@@ -566,10 +568,11 @@ if __name__ == '__main__':
         project='ecgsmartnet-cad-transfer-learning',
         name=model_name,
         config={
-            'method': 'Option 1 - Feature Extraction',
+            'method': 'Option 1 Modified - Layer4 + FC Fine-tuning',
             'pretrained_model': PRETRAINED_MODEL_PATH,
             'model': 'ECGSMARTNET',
             'task': 'CAD Detection',
+            'trainable_layers': 'layer4 + fc',
             'optimizer': 'AdamW',
             'num_epochs': NUM_EPOCHS,
             'lr': LEARNING_RATE,
