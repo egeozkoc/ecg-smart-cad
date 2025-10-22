@@ -459,17 +459,34 @@ if __name__ == '__main__':
     # Data directory
     DATA_DIR = 'cad_dataset_preprocessed/'
     
-    # Hyperparameters (optimized for fine-tuning layer4 + final layer)
-    LEARNING_RATE = 5e-4      # Moderate LR for layer4 + FC layer
-    BATCH_SIZE = 64
-    WEIGHT_DECAY = 1e-4
+    # Training parameters
     NUM_EPOCHS = 100           # Fewer epochs needed for transfer learning
     EARLY_STOP_PATIENCE = 15   # Stop if no improvement for 15 epochs
     
-    # Random seed
+    # Random seed for data loading
     SEED = 42
     torch.manual_seed(SEED)
     np.random.seed(SEED)
+    
+    # ============================================================
+    # HYPERPARAMETER SEARCH CONFIGURATION
+    # ============================================================
+    
+    # Define hyperparameter search space with continuous distributions
+    # Learning rates: sample from log-uniform distribution
+    LR_MIN, LR_MAX = 1e-5, 1e-2    # Learning rate range for fine-tuning
+    WD_MIN, WD_MAX = 1e-5, 1e-2    # Weight decay range
+    
+    # Batch sizes: sample from discrete powers of 2
+    BS_CHOICES = [32, 64, 128]
+    
+    # Number of random search iterations
+    N_RANDOM_SEARCH = 50
+    
+    # ============= CHANGE THIS TO RESUME FROM SPECIFIC ITERATION =============
+    START_ITERATION = 1  # Set to 1 to start from beginning, or higher to resume
+    # ==========================================================================
+    
     
     # Create models directory
     os.makedirs('models', exist_ok=True)
@@ -480,7 +497,7 @@ if __name__ == '__main__':
     
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'\n{"="*80}')
-    print(f'TRANSFER LEARNING - LAYER4 + FC FINE-TUNING')
+    print(f'TRANSFER LEARNING - LAYER4 + FC FINE-TUNING WITH RANDOM SEARCH')
     print(f'{"="*80}')
     print(f'Using device: {device}')
     if torch.cuda.is_available():
@@ -510,7 +527,6 @@ if __name__ == '__main__':
     # Create datasets
     train_dataset = TensorDataset(x_train, y_train)
     val_dataset = TensorDataset(x_val, y_val)
-    test_dataset = TensorDataset(x_test, y_test)
     
     print(f'\nClass distribution:')
     print(f'  Train: {torch.sum(y_train==0).item()} No CAD, {torch.sum(y_train==1).item()} CAD')
@@ -519,241 +535,428 @@ if __name__ == '__main__':
     print(f'{"="*80}\n')
     
     # ============================================================
-    # LOAD PRETRAINED MODEL & SETUP TRANSFER LEARNING
+    # RANDOM HYPERPARAMETER SEARCH
     # ============================================================
     
-    model, trainable_params, total_params = load_pretrained_model(
-        PRETRAINED_MODEL_PATH, device, num_classes=2
-    )
+    # Track best model across all hyperparameter configurations
+    global_best_val_loss = np.inf
+    global_best_model_path = None
+    global_best_hyperparams = None
+    
+    print(f"Starting random search with {N_RANDOM_SEARCH} iterations")
+    print(f"Starting from iteration: {START_ITERATION}")
+    print(f"Hyperparameter ranges:")
+    print(f"  lr:  [{LR_MIN:.1e}, {LR_MAX:.1e}] (log-uniform)")
+    print(f"  wd:  [{WD_MIN:.1e}, {WD_MAX:.1e}] (log-uniform)")
+    print(f"  bs:  {BS_CHOICES} (uniform choice)")
+    print()
+    
+    for count_search in range(1, N_RANDOM_SEARCH + 1):
+        # Skip iterations before start_iteration
+        if count_search < START_ITERATION:
+            continue
+        
+        # Set seed for reproducible hyperparameter sampling
+        np.random.seed(count_search * 42)
+        
+        # Sample hyperparameters from distributions
+        lr = np.exp(np.random.uniform(np.log(LR_MIN), np.log(LR_MAX)))
+        wd = np.exp(np.random.uniform(np.log(WD_MIN), np.log(WD_MAX)))
+        bs = int(np.random.choice(BS_CHOICES))
+        
+        print(f'\n{"="*80}')
+        print(f'RANDOM SEARCH ITERATION: {count_search}/{N_RANDOM_SEARCH}')
+        print(f'Sampled hyperparameters:')
+        print(f'  lr (learning rate): {lr:.6e}')
+        print(f'  batch size:         {bs}')
+        print(f'  weight decay:       {wd:.6e}')
+        print(f'{"="*80}\n')
+        
+        try:
+            # Set random seeds for this run
+            torch.random.manual_seed(count_search)
+            np.random.seed(count_search)
+            
+            current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
+            
+            # Load pretrained model and setup transfer learning
+            model, trainable_params, total_params = load_pretrained_model(
+                PRETRAINED_MODEL_PATH, device, num_classes=2
+            )
+            
+            # Setup optimizer (only for trainable parameters)
+            optimizer = torch.optim.AdamW(
+                filter(lambda p: p.requires_grad, model.parameters()),
+                lr=lr,
+                weight_decay=wd
+            )
+            
+            criterion = torch.nn.CrossEntropyLoss()
+            
+            # Weighted loss for validation
+            pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
+            val_criterion = torch.nn.CrossEntropyLoss(
+                weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device)
+            )
+            
+            # Mixed precision training (only on GPU)
+            use_amp = device.type == 'cuda'
+            scaler = torch.amp.GradScaler(enabled=use_amp)
+            
+            # Data loaders with current batch size
+            train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True, 
+                                      num_workers=4, pin_memory=True, persistent_workers=True)
+            val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False,
+                                    num_workers=2, pin_memory=True, persistent_workers=True)
+            
+            # Initialize wandb for this iteration
+            wandb.init(
+                project='ecgsmartnet-cad-transfer-learning-random-search',
+                config={
+                    'method': 'Transfer Learning - Layer4 + FC Fine-tuning',
+                    'pretrained_model': PRETRAINED_MODEL_PATH,
+                    'model': 'ECGSMARTNET',
+                    'task': 'CAD Detection',
+                    'trainable_layers': 'layer4 + fc',
+                    'optimizer': 'AdamW',
+                    'num_epochs': NUM_EPOCHS,
+                    'lr': lr,
+                    'batch_size': bs,
+                    'weight_decay': wd,
+                    'total_params': total_params,
+                    'trainable_params': trainable_params,
+                    'frozen_params': total_params - trainable_params,
+                    'early_stop_patience': EARLY_STOP_PATIENCE,
+                    'time': current_time,
+                    'iteration': count_search
+                }
+            )
+            
+            # Training loop
+            best_val_loss = np.inf
+            patience_counter = 0
+            
+            for epoch in range(NUM_EPOCHS):
+                print(f'Epoch {epoch+1}/{NUM_EPOCHS}')
+                
+                # Train
+                train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(
+                    model, device, train_loader, criterion, optimizer, scaler, use_amp
+                )
+                
+                # Validate
+                val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap, _, _ = val_epoch(
+                    model, device, val_loader, val_criterion, use_amp
+                )
+                
+                # Log to wandb
+                wandb.log({
+                    'Loss/Train': train_loss,
+                    'AUC/Train': train_auc,
+                    'AP/Train': train_ap,
+                    'Loss/Validation': val_loss,
+                    'AUC/Validation': val_auc,
+                    'AP/Validation': val_ap,
+                }, step=epoch)
+                
+                # Print metrics
+                print(f'  Train Loss: {train_loss:.3f}, AUC: {train_auc:.3f}, AP: {train_ap:.3f}, F1: {train_f1:.3f}')
+                print(f'  Val   Loss: {val_loss:.3f}, AUC: {val_auc:.3f}, AP: {val_ap:.3f}, F1: {val_f1:.3f}')
+                
+                # Save best model for this iteration
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    model_filename = f'models/transfer_learning_CAD_random_iter{count_search:03d}_{current_time}.pt'
+                    torch.save(model, model_filename)
+                    wandb.run.summary['best_val_loss'] = val_loss
+                    wandb.run.summary['best_val_auc'] = val_auc
+                    wandb.run.summary['best_val_ap'] = val_ap
+                    wandb.run.summary['best_epoch'] = epoch
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                
+                # Early stopping
+                if patience_counter >= EARLY_STOP_PATIENCE:
+                    print(f'  Early stopping at epoch {epoch+1}')
+                    break
+            
+            # Check if this is the best model overall
+            if best_val_loss < global_best_val_loss:
+                global_best_val_loss = best_val_loss
+                global_best_model_path = model_filename
+                global_best_hyperparams = {
+                    'lr': lr,
+                    'bs': bs,
+                    'wd': wd,
+                    'val_loss': best_val_loss,
+                    'val_auc': wandb.run.summary['best_val_auc'],
+                    'val_ap': wandb.run.summary['best_val_ap'],
+                    'time': current_time,
+                    'iteration': count_search
+                }
+                print(f'\n*** NEW BEST MODEL FOUND! ***')
+                print(f'  Iteration: {count_search}/{N_RANDOM_SEARCH}')
+                print(f'  Validation Loss: {best_val_loss:.4f}')
+                print(f'  Model saved to: {global_best_model_path}')
+            
+            wandb.finish()
+            
+            # Memory cleanup
+            del model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+        except Exception as e:
+            print(f'\n!!! ERROR in iteration {count_search} !!!')
+            print(f'Error type: {type(e).__name__}')
+            print(f'Error message: {str(e)}')
+            print('Skipping this configuration and continuing search...\n')
+            
+            # Try to clean up
+            try:
+                wandb.finish()
+            except:
+                pass
+            
+            try:
+                if 'model' in locals():
+                    del model
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except:
+                pass
+            
+            continue
     
     # ============================================================
-    # SETUP TRAINING
+    # EVALUATE BEST MODEL ON TEST SET
     # ============================================================
     
-    # Only optimize the final FC layer
-    optimizer = torch.optim.AdamW(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=LEARNING_RATE,
-        weight_decay=WEIGHT_DECAY
-    )
+    print(f'\n{"="*80}')
+    print('HYPERPARAMETER SEARCH COMPLETE')
+    print(f'{"="*80}')
     
-    criterion = torch.nn.CrossEntropyLoss()
+    # Check if any model was successfully trained
+    if global_best_model_path is None or global_best_hyperparams is None:
+        print('\n!!! ERROR: No models were successfully trained during the search !!!')
+        print('All iterations may have failed. Check the error messages above.')
+        print('Exiting without test evaluation.')
+        exit(1)
     
-    # Weighted loss for validation (handle class imbalance)
+    print(f'\nBest model details:')
+    print(f'  Validation Loss: {global_best_hyperparams["val_loss"]:.4f}')
+    print(f'  Validation AUC:  {global_best_hyperparams["val_auc"]:.3f}')
+    print(f'  Validation AP:   {global_best_hyperparams["val_ap"]:.3f}')
+    print(f'  lr:  {global_best_hyperparams["lr"]:.6e}')
+    print(f'  bs:  {global_best_hyperparams["bs"]}')
+    print(f'  wd:  {global_best_hyperparams["wd"]:.6e}')
+    print(f'  Model path: {global_best_model_path}')
+    print(f'\n{"="*80}')
+    print('Evaluating best model on test set...')
+    print(f'{"="*80}')
+    
+    # Load best model
+    best_model = torch.load(global_best_model_path)
+    best_model.eval()
+    
+    # Create test dataset and loaders
+    test_dataset = TensorDataset(x_test, y_test)
+    test_loader = DataLoader(test_dataset, batch_size=global_best_hyperparams['bs'], shuffle=False,
+                            num_workers=2, pin_memory=True)
+    val_loader_final = DataLoader(val_dataset, batch_size=global_best_hyperparams['bs'], shuffle=False,
+                                  num_workers=2, pin_memory=True)
+    
+    # Setup criterion
+    criterion_final = torch.nn.CrossEntropyLoss()
     pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
-    val_criterion = torch.nn.CrossEntropyLoss(
+    val_criterion_final = torch.nn.CrossEntropyLoss(
         weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device)
     )
     
-    # Mixed precision training (only on GPU)
-    use_amp = device.type == 'cuda'
-    scaler = torch.amp.GradScaler(enabled=use_amp)
-    
-    # Data loaders
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, 
-                              num_workers=4, pin_memory=True, persistent_workers=True)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False,
-                            num_workers=2, pin_memory=True, persistent_workers=True)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False,
-                             num_workers=2, pin_memory=True, persistent_workers=True)
-    
-    # ============================================================
-    # INITIALIZE WANDB
-    # ============================================================
-    
-    current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
-    model_name = f'transfer_learning_option1_{current_time}'
-    
-    wandb.init(
-        project='ecgsmartnet-cad-transfer-learning',
-        name=model_name,
-        config={
-            'method': 'Option 1 Modified - Layer4 + FC Fine-tuning',
-            'pretrained_model': PRETRAINED_MODEL_PATH,
-            'model': 'ECGSMARTNET',
-            'task': 'CAD Detection',
-            'trainable_layers': 'layer4 + fc',
-            'optimizer': 'AdamW',
-            'num_epochs': NUM_EPOCHS,
-            'lr': LEARNING_RATE,
-            'batch_size': BATCH_SIZE,
-            'weight_decay': WEIGHT_DECAY,
-            'total_params': total_params,
-            'trainable_params': trainable_params,
-            'frozen_params': total_params - trainable_params,
-            'early_stop_patience': EARLY_STOP_PATIENCE,
-            'seed': SEED,
-            'time': current_time
-        }
-    )
-    
-    # ============================================================
-    # TRAINING LOOP
-    # ============================================================
-    
-    print(f'{"="*80}')
-    print('TRAINING')
-    print(f'{"="*80}\n')
-    
-    best_val_loss = np.inf
-    best_val_auc = 0
-    best_epoch = 0
-    patience_counter = 0
-    
-    for epoch in range(NUM_EPOCHS):
-        print(f'Epoch {epoch+1}/{NUM_EPOCHS}')
-        
-        # Train
-        train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(
-            model, device, train_loader, criterion, optimizer, scaler, use_amp
-        )
-        
-        # Validate
-        val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap, y_val_true, y_val_pred = val_epoch(
-            model, device, val_loader, val_criterion, use_amp
-        )
-        
-        # Log to wandb
-        wandb.log({
-            'Loss/Train': train_loss,
-            'AUC/Train': train_auc,
-            'AP/Train': train_ap,
-            'F1/Train': train_f1,
-            'Loss/Validation': val_loss,
-            'AUC/Validation': val_auc,
-            'AP/Validation': val_ap,
-            'F1/Validation': val_f1,
-            'epoch': epoch
-        })
-        
-        # Print metrics
-        print(f'  Train Loss: {train_loss:.3f}, AUC: {train_auc:.3f}, AP: {train_ap:.3f}, F1: {train_f1:.3f}')
-        print(f'  Val   Loss: {val_loss:.3f}, AUC: {val_auc:.3f}, AP: {val_ap:.3f}, F1: {val_f1:.3f}')
-        
-        # Save best model
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_val_auc = val_auc
-            best_epoch = epoch
-            patience_counter = 0
-            
-            model_filename = f'models/{model_name}.pt'
-            torch.save(model, model_filename)
-            
-            wandb.run.summary['best_val_loss'] = val_loss
-            wandb.run.summary['best_val_auc'] = val_auc
-            wandb.run.summary['best_val_ap'] = val_ap
-            wandb.run.summary['best_epoch'] = epoch
-            
-            print(f'  ✓ Best model saved (Val Loss: {val_loss:.4f}, Val AUC: {val_auc:.3f})')
-        else:
-            patience_counter += 1
-            print(f'  No improvement ({patience_counter}/{EARLY_STOP_PATIENCE})')
-        
-        print()
-        
-        # Early stopping
-        if patience_counter >= EARLY_STOP_PATIENCE:
-            print(f'Early stopping triggered at epoch {epoch+1}')
-            print(f'Best epoch was {best_epoch+1} with Val Loss: {best_val_loss:.4f}\n')
-            break
-    
-    # ============================================================
-    # EVALUATION ON TEST SET
-    # ============================================================
-    
-    print(f'{"="*80}')
-    print('EVALUATING BEST MODEL ON TEST SET')
-    print(f'{"="*80}\n')
-    
-    # Load best model
-    best_model = torch.load(f'models/{model_name}.pt')
-    best_model.eval()
-    
     # Evaluate on test set
+    use_amp = device.type == 'cuda'
     test_loss, test_auc, test_acc, test_prec, test_rec, test_spec, test_f1, test_ap, y_test_true, y_test_pred = test_epoch(
-        best_model, device, test_loader, criterion, use_amp
+        best_model, device, test_loader, criterion_final, use_amp
     )
     
-    # Get final validation predictions
-    _, _, _, _, _, _, _, _, y_val_true, y_val_pred = val_epoch(
-        best_model, device, val_loader, val_criterion, use_amp
+    # Get validation predictions from best model
+    _, val_auc_final, _, _, _, _, _, val_ap_final, y_val_true, y_val_pred = val_epoch(
+        best_model, device, val_loader_final, val_criterion_final, use_amp
     )
     
     # Find optimal F1 threshold on validation set
     optimal_threshold, optimal_f1_val = find_optimal_f1_threshold(y_val_true, y_val_pred)
     
+    print(f'\n{"="*80}')
+    print('OPTIMAL THRESHOLD SELECTION (on Validation Set)')
+    print(f'{"="*80}')
+    print(f'  Optimal F1 Threshold: {optimal_threshold:.4f}')
+    print(f'  Validation F1 at optimal threshold: {optimal_f1_val:.3f}')
+    
+    # Recompute validation metrics at optimal threshold
+    val_acc_opt = accuracy_score(y_val_true, y_val_pred >= optimal_threshold)
+    val_prec_opt = precision_score(y_val_true, y_val_pred >= optimal_threshold)
+    val_rec_opt = recall_score(y_val_true, y_val_pred >= optimal_threshold)
+    val_spec_opt = recall_score(y_val_true, y_val_pred >= optimal_threshold, pos_label=0)
+    
+    print(f'  Validation Acc:  {val_acc_opt:.3f}')
+    print(f'  Validation Prec: {val_prec_opt:.3f}')
+    print(f'  Validation Rec:  {val_rec_opt:.3f}')
+    print(f'  Validation Spec: {val_spec_opt:.3f}')
+    
     # Apply optimal threshold to test set
-    y_test_pred_binary = (y_test_pred >= optimal_threshold).astype(int)
-    test_acc_opt = accuracy_score(y_test_true, y_test_pred_binary)
-    test_prec_opt = precision_score(y_test_true, y_test_pred_binary)
-    test_rec_opt = recall_score(y_test_true, y_test_pred_binary)
-    test_spec_opt = recall_score(y_test_true, y_test_pred_binary, pos_label=0)
-    test_f1_opt = f1_score(y_test_true, y_test_pred_binary)
+    test_acc_opt = accuracy_score(y_test_true, y_test_pred >= optimal_threshold)
+    test_prec_opt = precision_score(y_test_true, y_test_pred >= optimal_threshold)
+    test_rec_opt = recall_score(y_test_true, y_test_pred >= optimal_threshold)
+    test_spec_opt = recall_score(y_test_true, y_test_pred >= optimal_threshold, pos_label=0)
+    test_f1_opt = f1_score(y_test_true, y_test_pred >= optimal_threshold)
     
-    # ============================================================
-    # RESULTS
-    # ============================================================
-    
+    # Print test metrics with optimal threshold
+    print(f'\n{"="*80}')
+    print('TEST SET RESULTS (using optimal F1 threshold)')
     print(f'{"="*80}')
-    print('FINAL RESULTS')
-    print(f'{"="*80}')
-    print(f'\nValidation Set (Best Epoch: {best_epoch+1}):')
-    print(f'  AUC:  {best_val_auc:.4f}')
-    print(f'  Loss: {best_val_loss:.4f}')
-    print(f'\nTest Set:')
-    print(f'  AUC:         {test_auc:.4f}')
-    print(f'  AP:          {test_ap:.4f}')
-    print(f'  Accuracy:    {test_acc_opt:.4f}')
-    print(f'  Precision:   {test_prec_opt:.4f}')
-    print(f'  Recall/Sens: {test_rec_opt:.4f}')
-    print(f'  Specificity: {test_spec_opt:.4f}')
-    print(f'  F1 Score:    {test_f1_opt:.4f}')
-    print(f'\nOptimal F1 Threshold: {optimal_threshold:.4f}')
-    print(f'{"="*80}\n')
+    print(f'  Threshold used: {optimal_threshold:.4f}')
+    print(f'  Loss: {test_loss:.3f}')
+    print(f'  AUC:  {test_auc:.3f}')
+    print(f'  AP:   {test_ap:.3f}')
+    print(f'  Acc:  {test_acc_opt:.3f}')
+    print(f'  Prec: {test_prec_opt:.3f}')
+    print(f'  Rec:  {test_rec_opt:.3f}')
+    print(f'  Spec: {test_spec_opt:.3f}')
+    print(f'  F1:   {test_f1_opt:.3f}')
     
-    # Log to wandb
+    # Create final wandb run for test evaluation
+    wandb.init(
+        project='ecgsmartnet-cad-transfer-learning-random-search', 
+        name='FINAL_TEST_EVALUATION',
+        config={
+            'model': 'ECGSMARTNET - Transfer Learning', 
+            'task': 'CAD Detection',
+            'optimizer': 'AdamW',
+            'phase': 'test_evaluation',
+            **global_best_hyperparams
+        }
+    )
+    
+    # Log test metrics to wandb (using optimal threshold)
+    wandb.log({'Test/Loss': test_loss})
+    wandb.log({'Test/AUC': test_auc})
+    wandb.log({'Test/AP': test_ap})
+    wandb.log({'Test/Optimal_Threshold': optimal_threshold})
+    wandb.log({'Test/Accuracy': test_acc_opt})
+    wandb.log({'Test/Precision': test_prec_opt})
+    wandb.log({'Test/Recall': test_rec_opt})
+    wandb.log({'Test/Specificity': test_spec_opt})
+    wandb.log({'Test/F1': test_f1_opt})
+    
+    # Log validation metrics at optimal threshold
+    wandb.log({'Validation/Optimal_F1': optimal_f1_val})
+    wandb.log({'Validation/Accuracy_at_optimal': val_acc_opt})
+    wandb.log({'Validation/Precision_at_optimal': val_prec_opt})
+    wandb.log({'Validation/Recall_at_optimal': val_rec_opt})
+    wandb.log({'Validation/Specificity_at_optimal': val_spec_opt})
+    
     wandb.run.summary['test_auc'] = test_auc
     wandb.run.summary['test_ap'] = test_ap
-    wandb.run.summary['test_acc'] = test_acc_opt
-    wandb.run.summary['test_precision'] = test_prec_opt
-    wandb.run.summary['test_recall'] = test_rec_opt
-    wandb.run.summary['test_specificity'] = test_spec_opt
-    wandb.run.summary['test_f1'] = test_f1_opt
     wandb.run.summary['optimal_threshold'] = optimal_threshold
+    wandb.run.summary['test_f1_optimal'] = test_f1_opt
     
     # ============================================================
     # SAVE VISUALIZATIONS
     # ============================================================
     
-    print('Generating visualizations...')
+    print(f'\n{"="*80}')
+    print('GENERATING VISUALIZATIONS')
+    print(f'{"="*80}')
     
-    # ROC curve
-    plot_roc_curve(
-        y_val_true, y_val_pred,
-        y_test_true, y_test_pred,
-        f'models/{model_name}_roc.png'
-    )
+    # Plot ROC and PR curves
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
     
-    # Confusion matrix
-    plot_confusion_matrix(
-        y_test_true, y_test_pred, optimal_threshold,
-        f'models/{model_name}_cm.png'
-    )
+    # ROC Curve
+    fpr_val, tpr_val, thresholds_roc_val = roc_curve(y_val_true, y_val_pred)
+    fpr_test, tpr_test, thresholds_roc_test = roc_curve(y_test_true, y_test_pred)
+    
+    ax1.plot(fpr_val, tpr_val, 'b-', linewidth=2, label=f'Validation (AUC={val_auc_final:.3f})')
+    ax1.plot(fpr_test, tpr_test, 'r-', linewidth=2, label=f'Test (AUC={test_auc:.3f})')
+    ax1.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random')
+    
+    # Mark the optimal threshold point on validation curve
+    idx_val = np.argmin(np.abs(thresholds_roc_val - optimal_threshold))
+    ax1.plot(fpr_val[idx_val], tpr_val[idx_val], 'b*', markersize=15, 
+             label=f'Optimal Threshold (Val)', markeredgecolor='black', markeredgewidth=1)
+    
+    # Mark the optimal threshold point on test curve
+    idx_test = np.argmin(np.abs(thresholds_roc_test - optimal_threshold))
+    ax1.plot(fpr_test[idx_test], tpr_test[idx_test], 'r*', markersize=15, 
+             label=f'Optimal Threshold (Test)', markeredgecolor='black', markeredgewidth=1)
+    
+    ax1.set_xlabel('False Positive Rate', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('True Positive Rate', fontsize=12, fontweight='bold')
+    ax1.set_title('ROC Curve', fontsize=14, fontweight='bold')
+    ax1.legend(loc='lower right', fontsize=9)
+    ax1.grid(True, alpha=0.3)
+    
+    # Precision-Recall Curve
+    prec_val, rec_val, thresholds_pr_val = precision_recall_curve(y_val_true, y_val_pred)
+    prec_test, rec_test, thresholds_pr_test = precision_recall_curve(y_test_true, y_test_pred)
+    
+    ax2.plot(rec_val, prec_val, 'b-', linewidth=2, label=f'Validation (AP={val_ap_final:.3f})')
+    ax2.plot(rec_test, prec_test, 'r-', linewidth=2, label=f'Test (AP={test_ap:.3f})')
+    
+    # Mark the optimal threshold point on validation PR curve
+    if len(thresholds_pr_val) > 0:
+        idx_val_pr = np.argmin(np.abs(thresholds_pr_val - optimal_threshold))
+        ax2.plot(rec_val[idx_val_pr], prec_val[idx_val_pr], 'b*', markersize=15,
+                 label=f'Optimal Threshold (Val)', markeredgecolor='black', markeredgewidth=1)
+    
+    # Mark the optimal threshold point on test PR curve
+    if len(thresholds_pr_test) > 0:
+        idx_test_pr = np.argmin(np.abs(thresholds_pr_test - optimal_threshold))
+        ax2.plot(rec_test[idx_test_pr], prec_test[idx_test_pr], 'r*', markersize=15,
+                 label=f'Optimal Threshold (Test)', markeredgecolor='black', markeredgewidth=1)
+    
+    ax2.set_xlabel('Recall', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Precision', fontsize=12, fontweight='bold')
+    ax2.set_title('Precision-Recall Curve', fontsize=14, fontweight='bold')
+    ax2.legend(loc='best', fontsize=9)
+    ax2.grid(True, alpha=0.3)
+    
+    plt.suptitle(f'Best Model Performance (Iteration {global_best_hyperparams["iteration"]}, Optimal Threshold={optimal_threshold:.3f})\n' + 
+                 f'Transfer Learning: Layer4+FC Fine-tuning (lr={global_best_hyperparams["lr"]:.2e}, bs={global_best_hyperparams["bs"]}, wd={global_best_hyperparams["wd"]:.2e})', 
+                 fontsize=11, fontweight='bold')
+    plt.tight_layout()
+    
+    # Save plot
+    plot_path = f'models/transfer_learning_CAD_BEST_MODEL_iter{global_best_hyperparams["iteration"]:03d}_{global_best_hyperparams["time"]}_curves.png'
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    print(f'  ROC and PR curves saved to: {plot_path}')
+    
+    # Log plot to wandb
+    wandb.log({"ROC and PR Curves": wandb.Image(plot_path)})
+    
+    plt.close()
+    
+    # Save confusion matrix
+    cm_path = f'models/transfer_learning_CAD_BEST_MODEL_iter{global_best_hyperparams["iteration"]:03d}_{global_best_hyperparams["time"]}_cm.png'
+    plot_confusion_matrix(y_test_true, y_test_pred, optimal_threshold, cm_path)
+    print(f'  Confusion matrix saved to: {cm_path}')
+    wandb.log({"Confusion Matrix": wandb.Image(cm_path)})
     
     # Save predictions
-    np.save(f'models/{model_name}_val_predictions.npy', y_val_pred)
-    np.save(f'models/{model_name}_test_predictions.npy', y_test_pred)
-    
-    print(f'\n✓ All results saved to models/ directory')
-    print(f'  Model: {model_name}.pt')
-    print(f'  ROC curve: {model_name}_roc.png')
-    print(f'  Confusion matrix: {model_name}_cm.png')
-    print(f'  Predictions: {model_name}_val/test_predictions.npy')
+    pred_path = f'models/transfer_learning_CAD_BEST_MODEL_iter{global_best_hyperparams["iteration"]:03d}_{global_best_hyperparams["time"]}'
+    np.save(f'{pred_path}_val_predictions.npy', y_val_pred)
+    np.save(f'{pred_path}_test_predictions.npy', y_test_pred)
+    print(f'  Predictions saved to: {pred_path}_val/test_predictions.npy')
     
     wandb.finish()
     
     print(f'\n{"="*80}')
-    print('TRANSFER LEARNING COMPLETE!')
+    print('TRANSFER LEARNING WITH RANDOM SEARCH COMPLETE!')
+    print(f'{"="*80}')
+    print(f'\nBest model: {global_best_model_path}')
+    print(f'Test AUC: {test_auc:.4f}')
+    print(f'Test F1 (optimal threshold): {test_f1_opt:.4f}')
     print(f'{"="*80}\n')
+
 
