@@ -325,7 +325,7 @@ def main():
     
     # ============ Define Model Paths ============
     rf_model_path = 'best_rf.pkl'
-    dl_model_path = 'models/ecgsmartnet_CAD_random_2025-10-18-19-56-03.pt'
+    dl_model_path = 'models/ecgsmartnet_se_CAD_random_2025-10-21-00-10-53.pt'
     
     # ============ Load Data ============
     print('\n[1/6] Loading data...')
