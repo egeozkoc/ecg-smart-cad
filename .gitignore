@@ -16,3 +16,4 @@ test.py
 *.json
 *.wandb
 *.png
+/wandb
