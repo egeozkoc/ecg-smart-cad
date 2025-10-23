@@ -239,7 +239,7 @@ def plot_confusion_matrix(cm, model_name, save_path):
 
 def main():
     # Define model path in a single line
-    model_path = 'models/ecgsmartnet_CAD_random_2025-10-18-19-56-03.pt'  # Update this path
+    model_path = 'models/ecgsmartnet_se_CAD_random_2025-10-21-00-10-53.pt'  # Update this path
 
     # Device
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')

@@ -20,11 +20,12 @@ def detect_problematic_signals(data_dir='cad_dataset_preprocessed/'):
     all_ids = train_df['ID'].to_list() + val_df['ID'].to_list() + test_df['ID'].to_list()
     all_splits = ['train'] * len(train_df) + ['val'] * len(val_df) + ['test'] * len(test_df)
     
-    print(f"Checking {len(all_ids)} ECG files for division by zero issues...")
+    print(f"Checking {len(all_ids)} ECG files for division by zero issues and quality flags...")
     print("=" * 80)
     
     problematic_files = []
     missing_files = []
+    low_quality_files = []
     lead_names = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
     
     for idx, (file_id, split) in enumerate(zip(all_ids, all_splits)):
@@ -34,6 +35,15 @@ def detect_problematic_signals(data_dir='cad_dataset_preprocessed/'):
             # Load ECG data
             ecg_data = np.load(file_path, allow_pickle=True).item()
             ecg = ecg_data['waveforms']['ecg_median']
+            
+            # Check for low quality flag
+            poor_quality = ecg_data.get('poor_quality', False)
+            if poor_quality:
+                low_quality_files.append({
+                    'file_id': file_id,
+                    'split': split,
+                    'poor_quality': poor_quality
+                })
             
             # Apply the same preprocessing as in train_models.py (ORIGINAL BUGGY VERSION)
             ecg_cropped = ecg[:, 150:-50]
@@ -95,6 +105,17 @@ def detect_problematic_signals(data_dir='cad_dataset_preprocessed/'):
     print(f"  Files missing from directory: {len(missing_files)}")
     print(f"  Files successfully processed: {len(all_ids) - len(missing_files)}")
     print(f"  Files with division by zero issues: {len(problematic_files)}")
+    print(f"  Files with low quality flag: {len(low_quality_files)}")
+    
+    # Print low quality breakdown by split
+    if len(low_quality_files) > 0:
+        train_lq = sum(1 for f in low_quality_files if f['split'] == 'train')
+        val_lq = sum(1 for f in low_quality_files if f['split'] == 'val')
+        test_lq = sum(1 for f in low_quality_files if f['split'] == 'test')
+        
+        print(f"    - Train set: {train_lq}")
+        print(f"    - Val set: {val_lq}")
+        print(f"    - Test set: {test_lq}")
     
     if len(problematic_files) > 0:
         # Count by split
@@ -121,7 +142,7 @@ def detect_problematic_signals(data_dir='cad_dataset_preprocessed/'):
         for lead, count in lead_counts.most_common():
             print(f"    - {lead}: {count} times")
     
-    return problematic_files
+    return problematic_files, low_quality_files
 
 
 def visualize_problematic_signals(problematic_files, max_to_show=5):
@@ -167,36 +188,66 @@ def visualize_problematic_signals(problematic_files, max_to_show=5):
     plt.show()
 
 
-def save_report(problematic_files, output_file='division_by_zero_report.txt'):
+def save_report(problematic_files, low_quality_files, output_file='division_by_zero_report.txt'):
     """
-    Save a detailed report of problematic signals to a text file.
+    Save a detailed report of problematic signals and low quality files to a text file.
     """
     with open(output_file, 'w') as f:
-        f.write("Division by Zero Error Report\n")
+        f.write("ECG Signal Quality Report\n")
         f.write("=" * 80 + "\n\n")
+        
+        # Division by zero section
+        f.write("DIVISION BY ZERO ERRORS\n")
+        f.write("-" * 80 + "\n")
         f.write(f"Total problematic files: {len(problematic_files)}\n\n")
         
-        f.write("Detailed List:\n")
-        f.write("-" * 80 + "\n")
+        if len(problematic_files) > 0:
+            f.write("Detailed List:\n")
+            for i, file_info in enumerate(problematic_files, 1):
+                f.write(f"{i}. {file_info['file_id']}.npy\n")
+                f.write(f"   Split: {file_info['split']}\n")
+                f.write(f"   Problematic leads: {', '.join(file_info['zero_leads'])}\n")
+                f.write(f"   Number of zero leads: {file_info['num_zero_leads']}\n")
+                f.write("\n")
+        else:
+            f.write("No division by zero errors found.\n\n")
         
-        for i, file_info in enumerate(problematic_files, 1):
-            f.write(f"{i}. {file_info['file_id']}.npy\n")
-            f.write(f"   Split: {file_info['split']}\n")
-            f.write(f"   Problematic leads: {', '.join(file_info['zero_leads'])}\n")
-            f.write(f"   Number of zero leads: {file_info['num_zero_leads']}\n")
-            f.write("\n")
+        # Low quality section
+        f.write("\n" + "=" * 80 + "\n")
+        f.write("LOW QUALITY ECG FILES\n")
+        f.write("-" * 80 + "\n")
+        f.write(f"Total low quality files: {len(low_quality_files)}\n\n")
+        
+        if len(low_quality_files) > 0:
+            # Group by split
+            train_lq = [f for f in low_quality_files if f['split'] == 'train']
+            val_lq = [f for f in low_quality_files if f['split'] == 'val']
+            test_lq = [f for f in low_quality_files if f['split'] == 'test']
+            
+            f.write(f"By split:\n")
+            f.write(f"  Train: {len(train_lq)}\n")
+            f.write(f"  Val: {len(val_lq)}\n")
+            f.write(f"  Test: {len(test_lq)}\n\n")
+            
+            f.write("Detailed List:\n")
+            for i, file_info in enumerate(low_quality_files, 1):
+                f.write(f"{i}. {file_info['file_id']}.npy (split: {file_info['split']})\n")
+        else:
+            f.write("No low quality files found.\n")
     
     print(f"\nDetailed report saved to: {output_file}")
 
 
 if __name__ == '__main__':
-    # Detect problematic signals
-    problematic_files = detect_problematic_signals()
+    # Detect problematic signals and low quality files
+    problematic_files, low_quality_files = detect_problematic_signals()
     
     # Save report
+    if len(problematic_files) > 0 or len(low_quality_files) > 0:
+        save_report(problematic_files, low_quality_files)
+    
+    # Visualize problematic signals if any
     if len(problematic_files) > 0:
-        save_report(problematic_files)
-        
         # Ask if user wants to visualize
         print("\n" + "=" * 80)
         num_to_show = min(5, len(problematic_files))
@@ -206,5 +257,5 @@ if __name__ == '__main__':
         # For non-interactive execution, automatically visualize
         visualize_problematic_signals(problematic_files, max_to_show=5)
     else:
-        print("\n No division by zero issues found! All signals are clean.")
+        print("\n✓ No division by zero issues found! All signals are clean.")
 
