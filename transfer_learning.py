@@ -29,6 +29,72 @@ import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
 
+def load_and_preprocess_ecg(ecg_id, path):
+    """
+    Load and preprocess a single ECG file.
+    
+    Args:
+        ecg_id: ECG file ID
+        path: Directory path containing ECG files
+    
+    Returns:
+        Preprocessed ECG array
+    """
+    ecg = np.load(path + ecg_id + '.npy', allow_pickle=True).item()
+    ecg = ecg['waveforms']['ecg_median']
+    ecg = ecg[:, 150:-50]
+    ecg = signal.resample(ecg, 200, axis=1)
+    max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
+    
+    # Replace zeros with 1 to avoid division by zero
+    max_val = np.where(max_val == 0, 1, max_val)
+    ecg = ecg / max_val
+    
+    return ecg
+
+
+def check_and_fix_predictions(y_pred, dataset_name=""):
+    """
+    Check for NaN/Inf in predictions and fix them.
+    
+    Args:
+        y_pred: Prediction array
+        dataset_name: Name of dataset for logging (e.g., "VALIDATION", "TEST")
+    
+    Returns:
+        Fixed prediction array
+    """
+    if np.any(np.isnan(y_pred)) or np.any(np.isinf(y_pred)):
+        print(f"ERROR: NaN or Inf detected in {dataset_name} predictions!")
+        print(f"  NaN count: {np.sum(np.isnan(y_pred))}")
+        print(f"  Inf count: {np.sum(np.isinf(y_pred))}")
+        y_pred = np.nan_to_num(y_pred, nan=0.5, posinf=1.0, neginf=0.0)
+    return y_pred
+
+
+def compute_metrics(y_true, y_pred_proba, threshold=0.5):
+    """
+    Compute all classification metrics.
+    
+    Args:
+        y_true: True labels
+        y_pred_proba: Predicted probabilities
+        threshold: Classification threshold
+    
+    Returns:
+        Tuple of (auc, ap, acc, prec, rec, spec, f1)
+    """
+    auc = roc_auc_score(y_true, y_pred_proba)
+    ap = average_precision_score(y_true, y_pred_proba)
+    acc = accuracy_score(y_true, y_pred_proba > threshold)
+    prec = precision_score(y_true, y_pred_proba > threshold)
+    rec = recall_score(y_true, y_pred_proba > threshold)
+    spec = recall_score(y_true, y_pred_proba > threshold, pos_label=0)
+    f1 = f1_score(y_true, y_pred_proba > threshold)
+    
+    return auc, ap, acc, prec, rec, spec, f1
+
+
 def find_optimal_f1_threshold(y_true, y_pred_proba):
     """
     Find the threshold that maximizes F1 score.
@@ -134,25 +200,30 @@ def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, u
     y_pred = y_pred[:, 1]
     
     # Check for NaN/Inf in predictions
-    if np.any(np.isnan(y_pred)) or np.any(np.isinf(y_pred)):
-        print("ERROR: NaN or Inf detected in predictions!")
-        print(f"  NaN count: {np.sum(np.isnan(y_pred))}")
-        print(f"  Inf count: {np.sum(np.isinf(y_pred))}")
-        y_pred = np.nan_to_num(y_pred, nan=0.5, posinf=1.0, neginf=0.0)
+    y_pred = check_and_fix_predictions(y_pred, "TRAIN")
 
-    auc = roc_auc_score(y, y_pred)
-    ap = average_precision_score(y, y_pred)
-    acc = accuracy_score(y, y_pred > 0.5)
-    prec = precision_score(y, y_pred > 0.5)
-    rec = recall_score(y, y_pred > 0.5)
-    spec = recall_score(y, y_pred > 0.5, pos_label=0)
-    f1 = f1_score(y, y_pred > 0.5)
+    # Compute metrics
+    auc, ap, acc, prec, rec, spec, f1 = compute_metrics(y, y_pred)
 
     return train_loss, auc, acc, prec, rec, spec, f1, ap
 
 
-def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
-    val_loss = 0
+def evaluate_epoch(model, device, dataloader, criterion, use_amp=True, dataset_name="VALIDATION"):
+    """
+    Unified evaluation function for validation and test sets.
+    
+    Args:
+        model: Model to evaluate
+        device: Torch device
+        dataloader: Data loader
+        criterion: Loss criterion
+        use_amp: Whether to use automatic mixed precision
+        dataset_name: Name of dataset for logging
+    
+    Returns:
+        Tuple of (loss, auc, acc, prec, rec, spec, f1, ap, y_true, y_pred_proba)
+    """
+    eval_loss = 0
     total_samples = 0
     model.eval()
 
@@ -160,7 +231,7 @@ def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
     y_preds = []
 
     with torch.no_grad():
-        for (x,y) in val_dataloader:
+        for (x, y) in dataloader:
             x = x.to(device)
             y = y.to(device)
             x = torch.unsqueeze(x, 1)
@@ -171,7 +242,7 @@ def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
                 y_pred = torch.softmax(y_pred, dim=-1)
 
             batch_size = y.size(0)
-            val_loss += loss.item() * batch_size
+            eval_loss += loss.item() * batch_size
             total_samples += batch_size
 
             y_pred = y_pred.cpu().detach().numpy()
@@ -182,89 +253,22 @@ def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
 
     # Safeguard against empty lists
     if len(ys) == 0 or len(y_preds) == 0:
-        print("ERROR: All validation batches were empty! Returning dummy metrics.")
+        print(f"ERROR: All {dataset_name} batches were empty! Returning dummy metrics.")
         return np.inf, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, np.array([]), np.array([])
 
     y = np.concatenate(ys, axis=0)
     y_pred = np.concatenate(y_preds, axis=0)
-    val_loss /= total_samples
+    eval_loss /= total_samples
 
     y_pred = y_pred[:, 1]
     
-    # Check for NaN/Inf in validation predictions
-    if np.any(np.isnan(y_pred)) or np.any(np.isinf(y_pred)):
-        print("ERROR: NaN or Inf detected in VALIDATION predictions!")
-        print(f"  NaN count: {np.sum(np.isnan(y_pred))}")
-        print(f"  Inf count: {np.sum(np.isinf(y_pred))}")
-        y_pred = np.nan_to_num(y_pred, nan=0.5, posinf=1.0, neginf=0.0)
+    # Check for NaN/Inf in predictions
+    y_pred = check_and_fix_predictions(y_pred, dataset_name)
 
-    auc = roc_auc_score(y, y_pred)
-    ap = average_precision_score(y, y_pred)
-    acc = accuracy_score(y, y_pred > 0.5)
-    prec = precision_score(y, y_pred > 0.5)
-    rec = recall_score(y, y_pred > 0.5)
-    spec = recall_score(y, y_pred > 0.5, pos_label=0)
-    f1 = f1_score(y, y_pred > 0.5)
+    # Compute metrics
+    auc, ap, acc, prec, rec, spec, f1 = compute_metrics(y, y_pred)
 
-    return val_loss, auc, acc, prec, rec, spec, f1, ap, y, y_pred
-
-
-def test_epoch(model, device, test_dataloader, criterion, use_amp=True):
-    test_loss = 0
-    total_samples = 0
-    model.eval()
-
-    ys = []
-    y_preds = []
-
-    with torch.no_grad():
-        for (x,y) in test_dataloader:
-            x = x.to(device)
-            y = y.to(device)
-            x = torch.unsqueeze(x, 1)
-
-            with torch.amp.autocast(device_type='cuda', enabled=use_amp):
-                y_pred = model(x)
-                loss = criterion(y_pred, y)
-                y_pred = torch.softmax(y_pred, dim=-1)
-
-            batch_size = y.size(0)
-            test_loss += loss.item() * batch_size
-            total_samples += batch_size
-
-            y_pred = y_pred.cpu().detach().numpy()
-            y = y.cpu().detach().numpy()
-
-            ys.append(y)
-            y_preds.append(y_pred)
-
-    # Safeguard against empty lists
-    if len(ys) == 0 or len(y_preds) == 0:
-        print("ERROR: All test batches were empty! Returning dummy metrics.")
-        return np.inf, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, np.array([]), np.array([])
-
-    y = np.concatenate(ys, axis=0)
-    y_pred = np.concatenate(y_preds, axis=0)
-    test_loss /= total_samples
-
-    y_pred = y_pred[:, 1]
-    
-    # Check for NaN/Inf in test predictions
-    if np.any(np.isnan(y_pred)) or np.any(np.isinf(y_pred)):
-        print("ERROR: NaN or Inf detected in TEST predictions!")
-        print(f"  NaN count: {np.sum(np.isnan(y_pred))}")
-        print(f"  Inf count: {np.sum(np.isinf(y_pred))}")
-        y_pred = np.nan_to_num(y_pred, nan=0.5, posinf=1.0, neginf=0.0)
-
-    auc = roc_auc_score(y, y_pred)
-    ap = average_precision_score(y, y_pred)
-    acc = accuracy_score(y, y_pred > 0.5)
-    prec = precision_score(y, y_pred > 0.5)
-    rec = recall_score(y, y_pred > 0.5)
-    spec = recall_score(y, y_pred > 0.5, pos_label=0)
-    f1 = f1_score(y, y_pred > 0.5)
-
-    return test_loss, auc, acc, prec, rec, spec, f1, ap, y, y_pred
+    return eval_loss, auc, acc, prec, rec, spec, f1, ap, y, y_pred
 
 
 def get_data(path):
@@ -279,56 +283,16 @@ def get_data(path):
     val_ids = val_df['ID'].to_list()
     test_ids = test_df['ID'].to_list()
 
-    # get train data
-    train_data = []
-    for id in train_ids:
-        ecg = np.load(path + id + '.npy', allow_pickle=True).item()
-        ecg = ecg['waveforms']['ecg_median']
-        ecg = ecg[:,150:-50]
-        ecg = signal.resample(ecg, 200, axis=1)
-        max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
-        
-        # Replace zeros with 1 to avoid division by zero
-        max_val = np.where(max_val == 0, 1, max_val)
-        ecg = ecg / max_val
-        
-        train_data.append(ecg)
-    
-    train_data = np.array(train_data)
+    # Load and preprocess train data
+    train_data = np.array([load_and_preprocess_ecg(id, path) for id in train_ids])
     print(f"Train set: {len(train_data)} files loaded")
 
-    val_data = []
-    for id in val_ids:
-        ecg = np.load(path + id + '.npy', allow_pickle=True).item()
-        ecg = ecg['waveforms']['ecg_median']
-        ecg = ecg[:,150:-50]
-        ecg = signal.resample(ecg, 200, axis=1)
-        max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
-        
-        # Replace zeros with 1 to avoid division by zero
-        max_val = np.where(max_val == 0, 1, max_val)
-        ecg = ecg / max_val
-        
-        val_data.append(ecg)
-    
-    val_data = np.array(val_data)
+    # Load and preprocess validation data
+    val_data = np.array([load_and_preprocess_ecg(id, path) for id in val_ids])
     print(f"Val set: {len(val_data)} files loaded")
 
-    test_data = []
-    for id in test_ids:
-        ecg = np.load(path + id + '.npy', allow_pickle=True).item()
-        ecg = ecg['waveforms']['ecg_median']
-        ecg = ecg[:,150:-50]
-        ecg = signal.resample(ecg, 200, axis=1)
-        max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
-        
-        # Replace zeros with 1 to avoid division by zero
-        max_val = np.where(max_val == 0, 1, max_val)
-        ecg = ecg / max_val
-        
-        test_data.append(ecg)
-    
-    test_data = np.array(test_data)
+    # Load and preprocess test data
+    test_data = np.array([load_and_preprocess_ecg(id, path) for id in test_ids])
     print(f"Test set: {len(test_data)} files loaded")
 
     return train_data, train_outcomes, val_data, val_outcomes, test_data, test_outcomes
@@ -542,6 +506,9 @@ if __name__ == '__main__':
     print(f'  Test:  {torch.sum(y_test==0).item()} No CAD, {torch.sum(y_test==1).item()} CAD')
     print(f'{"="*80}\n')
     
+    # Calculate validation class weight (used for weighted loss)
+    val_pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
+    
     # ============================================================
     # RANDOM HYPERPARAMETER SEARCH
     # ============================================================
@@ -602,12 +569,10 @@ if __name__ == '__main__':
                 weight_decay=wd
             )
             
-            criterion = torch.nn.CrossEntropyLoss()
-            
-            # Weighted loss for validation
-            pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
+            # Setup loss criteria
+            train_criterion = torch.nn.CrossEntropyLoss()
             val_criterion = torch.nn.CrossEntropyLoss(
-                weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device)
+                weight=torch.tensor([1, val_pos_weight], dtype=torch.float32).to(device)
             )
             
             # Mixed precision training (only on GPU)
@@ -662,12 +627,12 @@ if __name__ == '__main__':
                 
                 # Train
                 train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(
-                    model, device, train_loader, criterion, optimizer, scaler, use_amp
+                    model, device, train_loader, train_criterion, optimizer, scaler, use_amp
                 )
                 
                 # Validate
-                val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap, _, _ = val_epoch(
-                    model, device, val_loader, val_criterion, use_amp
+                val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap, _, _ = evaluate_epoch(
+                    model, device, val_loader, val_criterion, use_amp, "VALIDATION"
                 )
                 
                 # Log to wandb
@@ -790,22 +755,21 @@ if __name__ == '__main__':
     val_loader_final = DataLoader(val_dataset, batch_size=global_best_hyperparams['bs'], shuffle=False,
                                   num_workers=2, pin_memory=True)
     
-    # Setup criterion
-    criterion_final = torch.nn.CrossEntropyLoss()
-    pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
+    # Setup criteria
+    test_criterion = torch.nn.CrossEntropyLoss()
     val_criterion_final = torch.nn.CrossEntropyLoss(
-        weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device)
+        weight=torch.tensor([1, val_pos_weight], dtype=torch.float32).to(device)
     )
     
     # Evaluate on test set
     use_amp = device.type == 'cuda'
-    test_loss, test_auc, test_acc, test_prec, test_rec, test_spec, test_f1, test_ap, y_test_true, y_test_pred = test_epoch(
-        best_model, device, test_loader, criterion_final, use_amp
+    test_loss, test_auc, test_acc, test_prec, test_rec, test_spec, test_f1, test_ap, y_test_true, y_test_pred = evaluate_epoch(
+        best_model, device, test_loader, test_criterion, use_amp, "TEST"
     )
     
     # Get validation predictions from best model
-    _, val_auc_final, _, _, _, _, _, val_ap_final, y_val_true, y_val_pred = val_epoch(
-        best_model, device, val_loader_final, val_criterion_final, use_amp
+    _, val_auc_final, _, _, _, _, _, val_ap_final, y_val_true, y_val_pred = evaluate_epoch(
+        best_model, device, val_loader_final, val_criterion_final, use_amp, "VALIDATION"
     )
     
     # Find optimal F1 threshold on validation set
@@ -818,10 +782,9 @@ if __name__ == '__main__':
     print(f'  Validation F1 at optimal threshold: {optimal_f1_val:.3f}')
     
     # Recompute validation metrics at optimal threshold
-    val_acc_opt = accuracy_score(y_val_true, y_val_pred >= optimal_threshold)
-    val_prec_opt = precision_score(y_val_true, y_val_pred >= optimal_threshold)
-    val_rec_opt = recall_score(y_val_true, y_val_pred >= optimal_threshold)
-    val_spec_opt = recall_score(y_val_true, y_val_pred >= optimal_threshold, pos_label=0)
+    _, _, val_acc_opt, val_prec_opt, val_rec_opt, val_spec_opt, _ = compute_metrics(
+        y_val_true, y_val_pred, threshold=optimal_threshold
+    )
     
     print(f'  Validation Acc:  {val_acc_opt:.3f}')
     print(f'  Validation Prec: {val_prec_opt:.3f}')
@@ -829,11 +792,9 @@ if __name__ == '__main__':
     print(f'  Validation Spec: {val_spec_opt:.3f}')
     
     # Apply optimal threshold to test set
-    test_acc_opt = accuracy_score(y_test_true, y_test_pred >= optimal_threshold)
-    test_prec_opt = precision_score(y_test_true, y_test_pred >= optimal_threshold)
-    test_rec_opt = recall_score(y_test_true, y_test_pred >= optimal_threshold)
-    test_spec_opt = recall_score(y_test_true, y_test_pred >= optimal_threshold, pos_label=0)
-    test_f1_opt = f1_score(y_test_true, y_test_pred >= optimal_threshold)
+    _, _, test_acc_opt, test_prec_opt, test_rec_opt, test_spec_opt, test_f1_opt = compute_metrics(
+        y_test_true, y_test_pred, threshold=optimal_threshold
+    )
     
     # Print test metrics with optimal threshold
     print(f'\n{"="*80}')
@@ -863,23 +824,23 @@ if __name__ == '__main__':
         }
     )
     
-    # Log test metrics to wandb (using optimal threshold)
-    wandb.log({'Test/Loss': test_loss})
-    wandb.log({'Test/AUC': test_auc})
-    wandb.log({'Test/AP': test_ap})
-    wandb.log({'Test/Optimal_Threshold': optimal_threshold})
-    wandb.log({'Test/Accuracy': test_acc_opt})
-    wandb.log({'Test/Precision': test_prec_opt})
-    wandb.log({'Test/Recall': test_rec_opt})
-    wandb.log({'Test/Specificity': test_spec_opt})
-    wandb.log({'Test/F1': test_f1_opt})
-    
-    # Log validation metrics at optimal threshold
-    wandb.log({'Validation/Optimal_F1': optimal_f1_val})
-    wandb.log({'Validation/Accuracy_at_optimal': val_acc_opt})
-    wandb.log({'Validation/Precision_at_optimal': val_prec_opt})
-    wandb.log({'Validation/Recall_at_optimal': val_rec_opt})
-    wandb.log({'Validation/Specificity_at_optimal': val_spec_opt})
+    # Log test and validation metrics to wandb (using optimal threshold)
+    wandb.log({
+        'Test/Loss': test_loss,
+        'Test/AUC': test_auc,
+        'Test/AP': test_ap,
+        'Test/Optimal_Threshold': optimal_threshold,
+        'Test/Accuracy': test_acc_opt,
+        'Test/Precision': test_prec_opt,
+        'Test/Recall': test_rec_opt,
+        'Test/Specificity': test_spec_opt,
+        'Test/F1': test_f1_opt,
+        'Validation/Optimal_F1': optimal_f1_val,
+        'Validation/Accuracy_at_optimal': val_acc_opt,
+        'Validation/Precision_at_optimal': val_prec_opt,
+        'Validation/Recall_at_optimal': val_rec_opt,
+        'Validation/Specificity_at_optimal': val_spec_opt
+    })
     
     wandb.run.summary['test_auc'] = test_auc
     wandb.run.summary['test_ap'] = test_ap
@@ -956,16 +917,18 @@ if __name__ == '__main__':
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     print(f'  ROC and PR curves saved to: {plot_path}')
     
-    # Log plot to wandb
-    wandb.log({"ROC and PR Curves": wandb.Image(plot_path)})
-    
     plt.close()
     
     # Save confusion matrix
     cm_path = f'models/transfer_learning_CAD_BEST_MODEL_iter{global_best_hyperparams["iteration"]:03d}_{global_best_hyperparams["time"]}_cm.png'
     plot_confusion_matrix(y_test_true, y_test_pred, optimal_threshold, cm_path)
     print(f'  Confusion matrix saved to: {cm_path}')
-    wandb.log({"Confusion Matrix": wandb.Image(cm_path)})
+    
+    # Log visualizations to wandb
+    wandb.log({
+        "ROC and PR Curves": wandb.Image(plot_path),
+        "Confusion Matrix": wandb.Image(cm_path)
+    })
     
     # Save predictions
     pred_path = f'models/transfer_learning_CAD_BEST_MODEL_iter{global_best_hyperparams["iteration"]:03d}_{global_best_hyperparams["time"]}'
