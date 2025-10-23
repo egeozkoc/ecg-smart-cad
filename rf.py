@@ -37,7 +37,6 @@ def get_data():
         x_train.append(features_id.to_numpy())
     x_train = np.concatenate(x_train, axis=0)
 
-
     # do not include serial ECGs in validation or test sets
     
     x_val = []
