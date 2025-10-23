@@ -4,6 +4,17 @@ from sklearn.metrics import roc_auc_score, average_precision_score, roc_curve, p
 import joblib
 import matplotlib.pyplot as plt
 
+def get_feature_importance(num_features):
+    # Load the best model
+    clf = joblib.load('best_rf.pkl')
+    
+    # Get feature importance
+    importances = clf.feature_importances_
+    importance_idx = np.argsort(importances)
+    importance_idx = importance_idx[::-1]
+    important_features = feature_names[importance_idx]
+    return important_features[:num_features]
+
 
 def get_data():
     # Use a single features file for all runs
@@ -161,6 +172,9 @@ if __name__ == '__main__':
     
     # Evaluate the model
     evaluate_model()
+    for num_features in [25, 50, 75, 100, 125, 150]:
+        feature_importance = get_feature_importance(num_features)
+        pd.DataFrame({'feature': feature_importance}).to_csv(f'feature_importance_{num_features}.csv', index=False)
 
     
 
