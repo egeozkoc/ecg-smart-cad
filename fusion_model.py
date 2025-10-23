@@ -138,6 +138,15 @@ def get_dl_predictions(model, device, dataloader):
                 print(f"  Processed {processed} samples...", flush=True)
 
     y_prob_pos = np.concatenate(all_pred_probs, axis=0)
+    
+    # Check for NaN/Inf in predictions
+    if np.any(np.isnan(y_prob_pos)) or np.any(np.isinf(y_prob_pos)):
+        print("WARNING: NaN or Inf detected in DL predictions!")
+        print(f"  NaN count: {np.sum(np.isnan(y_prob_pos))}")
+        print(f"  Inf count: {np.sum(np.isinf(y_prob_pos))}")
+        print("  Replacing NaN/Inf with 0.5 (neutral prediction)")
+        y_prob_pos = np.nan_to_num(y_prob_pos, nan=0.5, posinf=1.0, neginf=0.0)
+    
     return y_prob_pos
 
 
@@ -359,12 +368,25 @@ def main():
     # ============ Get Predictions ============
     print('\n[3/6] Getting predictions from individual models...')
     
+    # Check for NaN in input data
+    print('\nChecking input data for NaN/Inf...')
+    print(f'  RF Val data - NaN: {np.sum(np.isnan(x_val_rf))}, Inf: {np.sum(np.isinf(x_val_rf))}')
+    print(f'  RF Test data - NaN: {np.sum(np.isnan(x_test_rf))}, Inf: {np.sum(np.isinf(x_test_rf))}')
+    print(f'  DL Val data - NaN: {np.sum(np.isnan(x_val_dl))}, Inf: {np.sum(np.isinf(x_val_dl))}')
+    print(f'  DL Test data - NaN: {np.sum(np.isnan(x_test_dl))}, Inf: {np.sum(np.isinf(x_test_dl))}')
+    
     # RF predictions
     print('\nRF predictions:')
     print('  Validation set...')
     rf_val_probs = rf_model.predict_proba(x_val_rf)[:, 1]
     print('  Test set...')
     rf_test_probs = rf_model.predict_proba(x_test_rf)[:, 1]
+    
+    # Check RF predictions for NaN
+    if np.any(np.isnan(rf_val_probs)) or np.any(np.isinf(rf_val_probs)):
+        print(f'  WARNING: RF Val predictions - NaN: {np.sum(np.isnan(rf_val_probs))}, Inf: {np.sum(np.isinf(rf_val_probs))}')
+    if np.any(np.isnan(rf_test_probs)) or np.any(np.isinf(rf_test_probs)):
+        print(f'  WARNING: RF Test predictions - NaN: {np.sum(np.isnan(rf_test_probs))}, Inf: {np.sum(np.isinf(rf_test_probs))}')
     print('✓ RF predictions complete')
     
     # DL predictions
