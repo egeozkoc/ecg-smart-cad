@@ -2,9 +2,10 @@
 Transfer Learning for CAD Detection using Pretrained OMI Model
 
 This script loads a pretrained ECGSmartNet model with SE (Squeeze-and-Excitation) 
-blocks trained on OMI detection and fine-tunes layer4 (last residual block) and 
-the final FC layer for CAD detection. This provides more adaptation capacity than 
-freezing all except FC, while still preserving most of the pretrained features.
+blocks trained on OMI detection and fine-tunes layer3, layer4 (last two residual 
+blocks) and the final FC layer for CAD detection. This provides more adaptation 
+capacity than freezing all except FC, while still preserving most of the pretrained 
+features.
 
 Training strategy matches train_models_random_search.py:
 - 200 epochs with early stopping after 10 epochs without improvement
@@ -381,7 +382,7 @@ def plot_confusion_matrix(y_true, y_pred, threshold, save_path):
 def load_pretrained_model(pretrained_path, device, num_classes=2):
     """
     Load pretrained model and prepare for transfer learning (Option 1 Modified).
-    Freezes all layers except layer4 (last residual block) and final FC layer.
+    Freezes all layers except layer3, layer4 (last two residual blocks) and final FC layer.
     Uses ECGSMARTNET_Attention with SE (Squeeze-and-Excitation) blocks.
     
     Args:
@@ -390,7 +391,7 @@ def load_pretrained_model(pretrained_path, device, num_classes=2):
         num_classes: Number of output classes (default: 2 for binary CAD)
     
     Returns:
-        model: Model with frozen layers (trainable: layer4 + FC)
+        model: Model with frozen layers (trainable: layer3 + layer4 + FC)
         trainable_params: Number of trainable parameters
         total_params: Total number of parameters
     """
@@ -424,13 +425,13 @@ def load_pretrained_model(pretrained_path, device, num_classes=2):
     print(f'✓ Transferred {len(pretrained_dict_filtered)} layers from pretrained model')
     print(f'✓ Final FC layer initialized randomly for CAD detection')
     
-    # FREEZE all layers except layer4 and final FC layer
+    # FREEZE all layers except layer3, layer4 and final FC layer
     print(f'\n{"="*80}')
-    print('FREEZING LAYERS (Feature Extraction + Last Residual Block)')
+    print('FREEZING LAYERS (Feature Extraction + Last Two Residual Blocks)')
     print(f'{"="*80}')
     
     for name, param in model.named_parameters():
-        if 'layer4' in name or 'fc' in name:
+        if 'layer3' in name or 'layer4' in name or 'fc' in name:
             param.requires_grad = True
             print(f'  ✓ Trainable: {name}')
         else:
@@ -504,7 +505,7 @@ if __name__ == '__main__':
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'\n{"="*80}')
     print(f'TRANSFER LEARNING - ECGSMARTNET_ATTENTION (SE)')
-    print(f'LAYER4 + FC FINE-TUNING WITH RANDOM SEARCH')
+    print(f'LAYER3 + LAYER4 + FC FINE-TUNING WITH RANDOM SEARCH')
     print(f'{"="*80}')
     print(f'Using device: {device}')
     if torch.cuda.is_available():
@@ -623,12 +624,12 @@ if __name__ == '__main__':
             wandb.init(
                 project='ecgsmartnet-cad-transfer-learning-random-search',
                 config={
-                    'method': 'Transfer Learning - Layer4 + FC Fine-tuning',
+                    'method': 'Transfer Learning - Layer3 + Layer4 + FC Fine-tuning',
                     'pretrained_model': PRETRAINED_MODEL_PATH,
                     'model': 'ECGSMARTNET_Attention (SE)',
                     'task': 'CAD Detection',
                     'attention_type': 'se',
-                    'trainable_layers': 'layer4 + fc',
+                    'trainable_layers': 'layer3 + layer4 + fc',
                     'optimizer': 'AdamW',
                     'num_epochs': NUM_EPOCHS,
                     'lr epoch0': lr0,
@@ -946,8 +947,8 @@ if __name__ == '__main__':
     ax2.grid(True, alpha=0.3)
     
     plt.suptitle(f'Best Model Performance (Iteration {global_best_hyperparams["iteration"]}, Optimal Threshold={optimal_threshold:.3f})\n' + 
-                 f'Transfer Learning (ECGSMARTNET_Attention SE): Layer4+FC Fine-tuning (lr0={global_best_hyperparams["lr0"]:.2e}, lr={global_best_hyperparams["lr"]:.2e}, bs={global_best_hyperparams["bs"]}, wd={global_best_hyperparams["wd"]:.2e})', 
-                 fontsize=11, fontweight='bold')
+                 f'Transfer Learning (ECGSMARTNET_Attention SE): Layer3+Layer4+FC Fine-tuning (lr0={global_best_hyperparams["lr0"]:.2e}, lr={global_best_hyperparams["lr"]:.2e}, bs={global_best_hyperparams["bs"]}, wd={global_best_hyperparams["wd"]:.2e})', 
+                 fontsize=10, fontweight='bold')
     plt.tight_layout()
     
     # Save plot
