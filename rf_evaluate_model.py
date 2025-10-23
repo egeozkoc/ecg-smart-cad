@@ -4,7 +4,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score, roc_curve, p
 import joblib
 import matplotlib.pyplot as plt
 
-def get_feature_importance(num_features):
+def get_feature_importance():
 
     feature_names = pd.read_csv('features.txt', header=None)[0].tolist()
     # Load the best model
@@ -18,7 +18,7 @@ def get_feature_importance(num_features):
     
     # Convert feature_names to numpy array for fancy indexing
     feature_names_array = np.array(feature_names)
-    return feature_names_array[importance_idx[:num_features]], sorted_importance[:num_features]
+    return feature_names_array[importance_idx], sorted_importance
 
 
 def get_data():
@@ -175,11 +175,10 @@ def evaluate_model():
 
 if __name__ == '__main__':
     
-    # Evaluate the model
-    # evaluate_model()
-    for num_features in [25, 50, 75, 100, 125, 150]:
-        important_features, importance_scores = get_feature_importance(num_features)
-        pd.DataFrame({'feature': important_features, 'importance': importance_scores}).to_csv(f'feature_importance_{num_features}.csv', index=False)
+    # Evaluate the model, get feature importance
+    evaluate_model()
+    important_features, importance_scores = get_feature_importance()
+    pd.DataFrame({'feature': important_features, 'importance': importance_scores}).to_csv(f'rf_feature_importance.csv', index=False)
 
 
     
