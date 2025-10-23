@@ -5,6 +5,8 @@ import joblib
 import matplotlib.pyplot as plt
 
 def get_feature_importance(num_features):
+
+    feature_names = pd.read_csv('features.txt', header=None)[0].tolist()
     # Load the best model
     clf = joblib.load('best_rf.pkl')
     
@@ -12,8 +14,11 @@ def get_feature_importance(num_features):
     importances = clf.feature_importances_
     importance_idx = np.argsort(importances)
     importance_idx = importance_idx[::-1]
-    important_features = feature_names[importance_idx]
-    return important_features[:num_features]
+    sorted_importance = importances[importance_idx]
+    
+    # Convert feature_names to numpy array for fancy indexing
+    feature_names_array = np.array(feature_names)
+    return feature_names_array[importance_idx[:num_features]], sorted_importance[:num_features]
 
 
 def get_data():
@@ -171,10 +176,11 @@ def evaluate_model():
 if __name__ == '__main__':
     
     # Evaluate the model
-    evaluate_model()
+    # evaluate_model()
     for num_features in [25, 50, 75, 100, 125, 150]:
-        feature_importance = get_feature_importance(num_features)
-        pd.DataFrame({'feature': feature_importance}).to_csv(f'feature_importance_{num_features}.csv', index=False)
+        important_features, importance_scores = get_feature_importance(num_features)
+        pd.DataFrame({'feature': important_features, 'importance': importance_scores}).to_csv(f'feature_importance_{num_features}.csv', index=False)
+
 
     
 
