@@ -460,7 +460,7 @@ if __name__ == '__main__':
     # ============================================================
     
     # Path to pretrained OMI model (USER WILL PROVIDE THIS)
-    PRETRAINED_MODEL_PATH = 'models/ecgsmartnet_se_2025-09-22-10-41-20.pt'  # CHANGE THIS
+    PRETRAINED_MODEL_PATH = 'models/ecgsmartnet_se_omi_2025-09-22-10-41-20.pt'  # CHANGE THIS
     
     # Data directory
     DATA_DIR = 'cad_dataset_preprocessed/'
