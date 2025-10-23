@@ -1,11 +1,15 @@
 """
 Transfer Learning for CAD Detection using Pretrained OMI Model
-Option 1 Modified: Feature Extraction + Last Residual Block Fine-tuning
 
-This script loads a pretrained ECGSmartNet model trained on OMI detection
-and fine-tunes layer4 (last residual block) and the final FC layer for CAD detection.
-This provides more adaptation capacity than freezing all except FC, while still
-preserving most of the pretrained features.
+This script loads a pretrained ECGSmartNet model with SE (Squeeze-and-Excitation) 
+blocks trained on OMI detection and fine-tunes layer4 (last residual block) and 
+the final FC layer for CAD detection. This provides more adaptation capacity than 
+freezing all except FC, while still preserving most of the pretrained features.
+
+Training strategy matches train_models_random_search.py:
+- 200 epochs with early stopping after 10 epochs without improvement
+- Two learning rates: lr0 for epoch 0, lr for epochs 1+
+- Random hyperparameter search with 100 iterations
 """
 
 import os
@@ -347,7 +351,7 @@ def plot_roc_curve(y_val_true, y_val_pred, y_test_true, y_test_pred, save_path):
     plt.ylim([0.0, 1.05])
     plt.xlabel('False Positive Rate', fontsize=12)
     plt.ylabel('True Positive Rate', fontsize=12)
-    plt.title('ROC Curves - Transfer Learning (Feature Extraction)', fontsize=14)
+    plt.title('ROC Curves - Transfer Learning (ECGSMARTNET_Attention SE)', fontsize=14)
     plt.legend(loc="lower right", fontsize=11)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
@@ -365,7 +369,7 @@ def plot_confusion_matrix(y_true, y_pred, threshold, save_path):
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
                 xticklabels=['No CAD', 'CAD'], 
                 yticklabels=['No CAD', 'CAD'])
-    plt.title(f'Confusion Matrix - Transfer Learning\n(Threshold = {threshold:.3f})', fontsize=14)
+    plt.title(f'Confusion Matrix - Transfer Learning (ECGSMARTNET_Attention SE)\n(Threshold = {threshold:.3f})', fontsize=14)
     plt.ylabel('True Label', fontsize=12)
     plt.xlabel('Predicted Label', fontsize=12)
     plt.tight_layout()
@@ -378,6 +382,7 @@ def load_pretrained_model(pretrained_path, device, num_classes=2):
     """
     Load pretrained model and prepare for transfer learning (Option 1 Modified).
     Freezes all layers except layer4 (last residual block) and final FC layer.
+    Uses ECGSMARTNET_Attention with SE (Squeeze-and-Excitation) blocks.
     
     Args:
         pretrained_path: Path to pretrained .pt file
@@ -401,8 +406,8 @@ def load_pretrained_model(pretrained_path, device, num_classes=2):
     print(f'Pretrained model loaded successfully')
     print(f'Model type: {type(pretrained_model).__name__}')
     
-    # Create new model with same architecture
-    model = ECGSMARTNET(num_classes=num_classes).to(device)
+    # Create new model with same architecture (with SE attention blocks)
+    model = ECGSMARTNET_Attention(num_classes=num_classes, attention='se').to(device)
     
     # Copy pretrained weights (except final layer if num_classes differs)
     pretrained_dict = pretrained_model.state_dict()
@@ -460,8 +465,8 @@ if __name__ == '__main__':
     DATA_DIR = 'cad_dataset_preprocessed/'
     
     # Training parameters
-    NUM_EPOCHS = 100           # Fewer epochs needed for transfer learning
-    EARLY_STOP_PATIENCE = 15   # Stop if no improvement for 15 epochs
+    NUM_EPOCHS = 200           # Match training from scratch
+    EARLY_STOP_PATIENCE = 10   # Stop if no improvement for 10 epochs
     
     # Random seed for data loading
     SEED = 42
@@ -474,14 +479,15 @@ if __name__ == '__main__':
     
     # Define hyperparameter search space with continuous distributions
     # Learning rates: sample from log-uniform distribution
-    LR_MIN, LR_MAX = 1e-5, 1e-2    # Learning rate range for fine-tuning
-    WD_MIN, WD_MAX = 1e-5, 1e-2    # Weight decay range
+    LR0_MIN, LR0_MAX = 1e-4, 1e-1  # Initial learning rate range (epoch 0)
+    LR_MIN, LR_MAX = 1e-6, 1e-3    # Regular learning rate range (epochs 1+)
+    WD_MIN, WD_MAX = 1e-5, 1e-1    # Weight decay range
     
     # Batch sizes: sample from discrete powers of 2
-    BS_CHOICES = [32, 64, 128]
+    BS_CHOICES = [16, 32, 64, 128, 256]
     
     # Number of random search iterations
-    N_RANDOM_SEARCH = 50
+    N_RANDOM_SEARCH = 100
     
     # ============= CHANGE THIS TO RESUME FROM SPECIFIC ITERATION =============
     START_ITERATION = 1  # Set to 1 to start from beginning, or higher to resume
@@ -497,7 +503,8 @@ if __name__ == '__main__':
     
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'\n{"="*80}')
-    print(f'TRANSFER LEARNING - LAYER4 + FC FINE-TUNING WITH RANDOM SEARCH')
+    print(f'TRANSFER LEARNING - ECGSMARTNET_ATTENTION (SE)')
+    print(f'LAYER4 + FC FINE-TUNING WITH RANDOM SEARCH')
     print(f'{"="*80}')
     print(f'Using device: {device}')
     if torch.cuda.is_available():
@@ -546,6 +553,7 @@ if __name__ == '__main__':
     print(f"Starting random search with {N_RANDOM_SEARCH} iterations")
     print(f"Starting from iteration: {START_ITERATION}")
     print(f"Hyperparameter ranges:")
+    print(f"  lr0: [{LR0_MIN:.1e}, {LR0_MAX:.1e}] (log-uniform)")
     print(f"  lr:  [{LR_MIN:.1e}, {LR_MAX:.1e}] (log-uniform)")
     print(f"  wd:  [{WD_MIN:.1e}, {WD_MAX:.1e}] (log-uniform)")
     print(f"  bs:  {BS_CHOICES} (uniform choice)")
@@ -560,6 +568,7 @@ if __name__ == '__main__':
         np.random.seed(count_search * 42)
         
         # Sample hyperparameters from distributions
+        lr0 = np.exp(np.random.uniform(np.log(LR0_MIN), np.log(LR0_MAX)))
         lr = np.exp(np.random.uniform(np.log(LR_MIN), np.log(LR_MAX)))
         wd = np.exp(np.random.uniform(np.log(WD_MIN), np.log(WD_MAX)))
         bs = int(np.random.choice(BS_CHOICES))
@@ -567,9 +576,10 @@ if __name__ == '__main__':
         print(f'\n{"="*80}')
         print(f'RANDOM SEARCH ITERATION: {count_search}/{N_RANDOM_SEARCH}')
         print(f'Sampled hyperparameters:')
-        print(f'  lr (learning rate): {lr:.6e}')
-        print(f'  batch size:         {bs}')
-        print(f'  weight decay:       {wd:.6e}')
+        print(f'  lr0 (initial): {lr0:.6e}')
+        print(f'  lr (main):     {lr:.6e}')
+        print(f'  batch size:    {bs}')
+        print(f'  weight decay:  {wd:.6e}')
         print(f'{"="*80}\n')
         
         try:
@@ -615,11 +625,13 @@ if __name__ == '__main__':
                 config={
                     'method': 'Transfer Learning - Layer4 + FC Fine-tuning',
                     'pretrained_model': PRETRAINED_MODEL_PATH,
-                    'model': 'ECGSMARTNET',
+                    'model': 'ECGSMARTNET_Attention (SE)',
                     'task': 'CAD Detection',
+                    'attention_type': 'se',
                     'trainable_layers': 'layer4 + fc',
                     'optimizer': 'AdamW',
                     'num_epochs': NUM_EPOCHS,
+                    'lr epoch0': lr0,
                     'lr': lr,
                     'batch_size': bs,
                     'weight_decay': wd,
@@ -634,9 +646,17 @@ if __name__ == '__main__':
             
             # Training loop
             best_val_loss = np.inf
-            patience_counter = 0
+            count = 0
             
             for epoch in range(NUM_EPOCHS):
+                # Set learning rate schedule (lr0 for epoch 0, lr for rest)
+                if epoch == 0:
+                    for param_group in optimizer.param_groups:
+                        param_group['lr'] = lr0
+                else:
+                    for param_group in optimizer.param_groups:
+                        param_group['lr'] = lr
+                
                 print(f'Epoch {epoch+1}/{NUM_EPOCHS}')
                 
                 # Train
@@ -672,12 +692,12 @@ if __name__ == '__main__':
                     wandb.run.summary['best_val_auc'] = val_auc
                     wandb.run.summary['best_val_ap'] = val_ap
                     wandb.run.summary['best_epoch'] = epoch
-                    patience_counter = 0
+                    count = 0
                 else:
-                    patience_counter += 1
+                    count += 1
                 
                 # Early stopping
-                if patience_counter >= EARLY_STOP_PATIENCE:
+                if count == EARLY_STOP_PATIENCE:
                     print(f'  Early stopping at epoch {epoch+1}')
                     break
             
@@ -686,6 +706,7 @@ if __name__ == '__main__':
                 global_best_val_loss = best_val_loss
                 global_best_model_path = model_filename
                 global_best_hyperparams = {
+                    'lr0': lr0,
                     'lr': lr,
                     'bs': bs,
                     'wd': wd,
@@ -748,6 +769,7 @@ if __name__ == '__main__':
     print(f'  Validation Loss: {global_best_hyperparams["val_loss"]:.4f}')
     print(f'  Validation AUC:  {global_best_hyperparams["val_auc"]:.3f}')
     print(f'  Validation AP:   {global_best_hyperparams["val_ap"]:.3f}')
+    print(f'  lr0: {global_best_hyperparams["lr0"]:.6e}')
     print(f'  lr:  {global_best_hyperparams["lr"]:.6e}')
     print(f'  bs:  {global_best_hyperparams["bs"]}')
     print(f'  wd:  {global_best_hyperparams["wd"]:.6e}')
@@ -831,8 +853,9 @@ if __name__ == '__main__':
         project='ecgsmartnet-cad-transfer-learning-random-search', 
         name='FINAL_TEST_EVALUATION',
         config={
-            'model': 'ECGSMARTNET - Transfer Learning', 
-            'task': 'CAD Detection',
+            'model': 'ECGSMARTNET_Attention (SE) - Transfer Learning', 
+            'outcome': 'CAD',
+            'attention_type': 'se',
             'optimizer': 'AdamW',
             'phase': 'test_evaluation',
             **global_best_hyperparams
@@ -923,7 +946,7 @@ if __name__ == '__main__':
     ax2.grid(True, alpha=0.3)
     
     plt.suptitle(f'Best Model Performance (Iteration {global_best_hyperparams["iteration"]}, Optimal Threshold={optimal_threshold:.3f})\n' + 
-                 f'Transfer Learning: Layer4+FC Fine-tuning (lr={global_best_hyperparams["lr"]:.2e}, bs={global_best_hyperparams["bs"]}, wd={global_best_hyperparams["wd"]:.2e})', 
+                 f'Transfer Learning (ECGSMARTNET_Attention SE): Layer4+FC Fine-tuning (lr0={global_best_hyperparams["lr0"]:.2e}, lr={global_best_hyperparams["lr"]:.2e}, bs={global_best_hyperparams["bs"]}, wd={global_best_hyperparams["wd"]:.2e})', 
                  fontsize=11, fontweight='bold')
     plt.tight_layout()
     
