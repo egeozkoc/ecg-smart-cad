@@ -10,6 +10,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 import joblib
 from sklearn.svm import SVC
+import os
 
 def get_data(num_features):
     # Read the feature importance rankings to get top N features
@@ -61,6 +62,9 @@ def get_data(num_features):
     return x_train, y_train, x_val, y_val, x_test, y_test
 
 def train_model(num_features):
+    # Create directory for models if it doesn't exist
+    os.makedirs('rf_models', exist_ok=True)
+    
     # Get Data
     x_train, y_train, x_val, y_val, x_test, y_test = get_data(num_features)
 
@@ -141,7 +145,7 @@ def train_model(num_features):
                                             print('Best Running Test AP:', ap_test)
                                             print('Best Running Params:', best_params)
                                             np.save(f'best_params_{num_features}.npy', best_params)
-                                            joblib.dump(clf, f'models/best_rf_{num_features}.pkl')
+                                            joblib.dump(clf, f'rf_models/best_rf_{num_features}.pkl')
 
     print('Best Val Score:', best_score)
     print('Best Val AUC:', best_auc)
@@ -156,7 +160,7 @@ def test_model(num_features):
     x_train, y_train, x_val, y_val, x_test, y_test = get_data(num_features)
 
     # Load the trained model
-    clf = joblib.load(f'models/best_rf_{num_features}.pkl')
+    clf = joblib.load(f'rf_models/best_rf_{num_features}.pkl')
 
     y_pred = clf.predict_proba(x_val)[:,1]
     auc_val = roc_auc_score(y_val, y_pred)
@@ -231,7 +235,8 @@ def train_model_all_features(num_features=None):
     print('Test AUC:', auc_test)
     print('Test AP:', ap_test)
 
-    joblib.dump(clf, f'models/rf_selected_features_{num_features}.pkl')
+    os.makedirs('rf_models', exist_ok=True)
+    joblib.dump(clf, f'rf_models/rf_selected_features_{num_features}.pkl')
 
 if __name__ == '__main__':
 
