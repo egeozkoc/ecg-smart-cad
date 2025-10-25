@@ -206,7 +206,7 @@ def plot_confusion_matrix(cm, model_name, save_path):
 
 def main():
 
-    folder_path = 'rf/models/'
+    folder_path = 'rf_models/'
     for file in Path(folder_path).glob('*.pkl'):
         model_path = file
 
