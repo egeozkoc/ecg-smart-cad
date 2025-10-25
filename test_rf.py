@@ -9,7 +9,7 @@ from sklearn.metrics import (roc_auc_score, average_precision_score, accuracy_sc
                               precision_score, recall_score, f1_score, roc_curve, confusion_matrix)
 
 
-def get_data():
+def get_data(num_features):
     """Load feature-based data for RF model evaluation.
     
     Returns:
@@ -18,11 +18,12 @@ def get_data():
         x_test: test features
         y_test: test labels
     """
+    
+    feature_importance = pd.read_csv('rf_feature_importance.csv')
+    feature_names = feature_importance['feature'].tolist()[:num_features]
     # Use the same features file as training
     features = pd.read_csv('results/features.csv')
 
-    # Load feature names from single text file (one feature per line)
-    feature_names = pd.read_csv('features.txt', header=None)[0].tolist()
 
     val_df = pd.read_csv('val_set.csv')
     test_df = pd.read_csv('test_set.csv')
@@ -219,7 +220,9 @@ def main():
         
         # Load data
         print('\nLoading validation and test data...')
-        x_val, y_val, x_test, y_test = get_data()
+        num_features = file.stem.split('_')[-1]
+        num_features = int(num_features)
+        x_val, y_val, x_test, y_test = get_data(num_features)
         print('✓ Data loaded successfully')
         
         # Load RF model
