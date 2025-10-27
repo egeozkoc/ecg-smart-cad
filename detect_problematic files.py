@@ -240,6 +240,7 @@ def save_report(problematic_files, low_quality_files, output_file='division_by_z
 
 if __name__ == '__main__':
     # Detect problematic signals and low quality files
+    visualize_flag = False
     problematic_files, low_quality_files = detect_problematic_signals()
     
     # Save report
@@ -255,7 +256,8 @@ if __name__ == '__main__':
         print(f"(Will show {num_to_show} out of {len(problematic_files)} problematic files)")
         
         # For non-interactive execution, automatically visualize
-        visualize_problematic_signals(problematic_files, max_to_show=5)
+        if visualize_flag:
+            visualize_problematic_signals(problematic_files, max_to_show=5)
     else:
-        print("\n✓ No division by zero issues found! All signals are clean.")
+        print("\nNo division by zero issues found! All signals are clean.")
 
