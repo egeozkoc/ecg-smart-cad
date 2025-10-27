@@ -165,10 +165,6 @@ def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
             ys.append(y)
             y_preds.append(y_pred)
 
-    # Safeguard against empty lists
-    if len(ys) == 0 or len(y_preds) == 0:
-        print("ERROR: All validation batches were empty! Returning dummy metrics.")
-        return np.inf, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, np.array([]), np.array([])
 
     y = np.concatenate(ys, axis=0)
     y_pred = np.concatenate(y_preds, axis=0)
@@ -223,11 +219,6 @@ def test_epoch(model, device, test_dataloader, criterion, use_amp=True):
             ys.append(y)
             y_preds.append(y_pred)
 
-    # Safeguard against empty lists
-    if len(ys) == 0 or len(y_preds) == 0:
-        print("ERROR: All test batches were empty! Returning dummy metrics.")
-        return np.inf, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, np.array([]), np.array([])
-
     y = np.concatenate(ys, axis=0)
     y_pred = np.concatenate(y_preds, axis=0)
     test_loss /= total_samples
@@ -271,12 +262,6 @@ def get_data(path):
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
         max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
-        
-        # Replace zeros with 1 to avoid division by zero
-        # Disconnected leads (max=0) will remain zero after division (0/1=0)
-        max_val = np.where(max_val == 0, 1, max_val)
-        ecg = ecg / max_val
-        
         train_data.append(ecg)
     
     train_data = np.array(train_data)
@@ -289,12 +274,6 @@ def get_data(path):
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
         max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
-        
-        # Replace zeros with 1 to avoid division by zero
-        # Disconnected leads (max=0) will remain zero after division (0/1=0)
-        max_val = np.where(max_val == 0, 1, max_val)
-        ecg = ecg / max_val
-        
         val_data.append(ecg)
     
     val_data = np.array(val_data)
@@ -307,12 +286,6 @@ def get_data(path):
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
         max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
-        
-        # Replace zeros with 1 to avoid division by zero
-        # Disconnected leads (max=0) will remain zero after division (0/1=0)
-        max_val = np.where(max_val == 0, 1, max_val)
-        ecg = ecg / max_val
-        
         test_data.append(ecg)
     
     test_data = np.array(test_data)
@@ -336,16 +309,9 @@ if __name__ == '__main__':
     else:
         print('WARNING: No GPU detected, training will be SLOW on CPU!')
     print(f'{"="*80}\n')
-    # model = Temporal().to(device)
 
     x_train, y_train, x_val, y_val, x_test, y_test = get_data(path)
 
-    # model is pretrained ResNet18 ############################################################################################################
-    # model = models.resnet18(weights='DEFAULT')
-    # model.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-    # model.fc = nn.Linear(model.fc.in_features, 2)
-    # model = model.to(device)
-    ############################################################################################################################################
 
     x_train = torch.tensor(x_train, dtype=torch.float32)
     y_train = torch.tensor(y_train, dtype=torch.long)
