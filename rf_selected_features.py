@@ -243,6 +243,3 @@ if __name__ == '__main__':
     for num_features in [25, 50, 75, 100, 125, 150]:
         # Pass the integer, not the DataFrame
         train_model(num_features)
-
-    # train_model_all_features()
-    # test_model()
