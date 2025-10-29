@@ -148,7 +148,8 @@ def get_data(path):
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
         max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
-        ecg = ecg / max_val
+        if np.sum(max_val) > 0:
+            ecg = ecg / max_val[:, None]
         train_data.append(ecg)
     
     train_data = np.array(train_data)
@@ -161,7 +162,8 @@ def get_data(path):
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
         max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
-        ecg = ecg / max_val
+        if np.sum(max_val) > 0:
+            ecg = ecg / max_val[:, None]
         val_data.append(ecg)
     
     val_data = np.array(val_data)
@@ -230,7 +232,7 @@ if __name__ == '__main__':
 
             current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
             model = ECGSMARTNET().to(device)
-            wandb.init(project='ecgsmartnet-cad-random-search', 
+            wandb.init(project='ecgsmartnet-cad-final', 
                        config={'model': 'ECGSMARTNET', 
                                'outcome': 'CAD', 
                                'optimizer': 'AdamW',
@@ -248,7 +250,7 @@ if __name__ == '__main__':
             pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
             val_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device))
             
-            # Only enable mixed precision on GPU
+
             use_amp = device.type == 'cuda'
             scaler = torch.amp.GradScaler(enabled=use_amp)
 
