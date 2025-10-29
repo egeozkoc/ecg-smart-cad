@@ -132,7 +132,7 @@ def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
 
 
 def get_data(path):
-    
+ 
     train_df = pd.read_csv('train_set.csv')
     val_df = pd.read_csv('val_set.csv')
     train_outcomes = train_df['label'].to_numpy()
@@ -143,14 +143,16 @@ def get_data(path):
     # get train data
     train_data = []
     for id in train_ids:
+
         ecg = np.load(path + id + '.npy', allow_pickle=True).item()
         ecg = ecg['waveforms']['ecg_median']
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
-        max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
+        max_val = np.max(np.abs(ecg), axis=1)
         if np.sum(max_val) > 0:
             ecg = ecg / max_val[:, None]
         train_data.append(ecg)
+    train_data = np.array(train_data)
     
     train_data = np.array(train_data)
     print(f"Train set: {len(train_data)} files loaded")
@@ -244,6 +246,25 @@ if __name__ == '__main__':
                                'time': current_time
                         }
             )
+
+
+            # current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
+            # model = ECGSMARTNET_Attention(attention='se').to(device)
+            # wandb.init(project='ecgsmartnet-cad-random-search', 
+            #            config={'model': 'ECGSMARTNET_SE', 
+            #                    'outcome': 'CAD', 
+            #                    'optimizer': 'AdamW',
+            #                    'num_epochs': 200,
+            #                    'lr epoch0': lr0,
+            #                    'lr': lr,
+            #                    'bs': bs,
+            #                    'weight decay': wd,
+            #                    'attention': 'se',
+            #                    'time': current_time
+            #             }
+            # )
+
+
 
             optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
             criterion = torch.nn.CrossEntropyLoss()
