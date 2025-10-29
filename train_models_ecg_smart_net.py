@@ -151,23 +151,21 @@ def get_data(path):
         max_val = np.max(np.abs(ecg), axis=1)
         if np.sum(max_val) > 0:
             ecg = ecg / max_val[:, None]
-        train_data.append(ecg)
-    train_data = np.array(train_data)
-    
+        train_data.append(ecg)    
     train_data = np.array(train_data)
     print(f"Train set: {len(train_data)} files loaded")
 
     val_data = []
     for id in val_ids:
+
         ecg = np.load(path + id + '.npy', allow_pickle=True).item()
         ecg = ecg['waveforms']['ecg_median']
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
-        max_val = np.max(np.abs(ecg), axis=1, keepdims=True)
+        max_val = np.max(np.abs(ecg), axis=1)
         if np.sum(max_val) > 0:
             ecg = ecg / max_val[:, None]
-        val_data.append(ecg)
-    
+        val_data.append(ecg)    
     val_data = np.array(val_data)
     print(f"Val set: {len(val_data)} files loaded")
 
