@@ -230,26 +230,10 @@ if __name__ == '__main__':
             torch.random.manual_seed(count_search)
             np.random.seed(count_search)
 
-            current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
-            model = ECGSMARTNET().to(device)
-            wandb.init(project='ecgsmartnet-cad-final', 
-                       config={'model': 'ECGSMARTNET', 
-                               'outcome': 'CAD', 
-                               'optimizer': 'AdamW',
-                               'num_epochs': 200,
-                               'lr epoch0': lr0,
-                               'lr': lr,
-                               'bs': bs,
-                               'weight decay': wd,
-                               'time': current_time
-                        }
-            )
-
-
             # current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
-            # model = ECGSMARTNET_Attention(attention='se').to(device)
-            # wandb.init(project='ecgsmartnet-cad-random-search', 
-            #            config={'model': 'ECGSMARTNET_SE', 
+            # model = ECGSMARTNET().to(device)
+            # wandb.init(project='ecgsmartnet-cad-final', 
+            #            config={'model': 'ECGSMARTNET', 
             #                    'outcome': 'CAD', 
             #                    'optimizer': 'AdamW',
             #                    'num_epochs': 200,
@@ -257,10 +241,26 @@ if __name__ == '__main__':
             #                    'lr': lr,
             #                    'bs': bs,
             #                    'weight decay': wd,
-            #                    'attention': 'se',
             #                    'time': current_time
             #             }
             # )
+
+
+            current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
+            model = ECGSMARTNET_Attention(attention='se').to(device)
+            wandb.init(project='ecgsmartnet-cad-final', 
+                       config={'model': 'ECGSMARTNET_SE', 
+                               'outcome': 'CAD', 
+                               'optimizer': 'AdamW',
+                               'num_epochs': 200,
+                               'lr epoch0': lr0,
+                               'lr': lr,
+                               'bs': bs,
+                               'weight decay': wd,
+                               'attention': 'se',
+                               'time': current_time
+                        }
+            )
 
 
 
