@@ -1,18 +1,27 @@
 import numpy as np
 import pandas as pd
-from glob import glob
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score, average_precision_score, confusion_matrix, roc_curve, precision_score, make_scorer
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, Normalizer
-from sklearn.feature_selection import SelectKBest, f_classif, chi2
-from sklearn.calibration import CalibratedClassifierCV
-from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
+from sklearn.metrics import roc_auc_score, average_precision_score, make_scorer
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 import os
 import joblib
-from sklearn.svm import SVC
-import wandb
+
+def get_feature_importance():
+
+    feature_names = pd.read_csv('features.txt', header=None)[0].tolist()
+    # Load the best model
+    clf = joblib.load('rf_models/best_rf_all_features.pkl')
+    
+    # Get feature importance
+    importances = clf.feature_importances_
+    importance_idx = np.argsort(importances)
+    importance_idx = importance_idx[::-1]
+    sorted_importance = importances[importance_idx]
+    
+    # Convert feature_names to numpy array for fancy indexing
+    feature_names_array = np.array(feature_names)
+    return feature_names_array[importance_idx], sorted_importance
+
 
 def harmonic_mean_scorer(y_true, y_pred_proba):
     auc = roc_auc_score(y_true, y_pred_proba)
@@ -66,10 +75,10 @@ def get_data():
 
     return x_train, y_train, x_val, y_val, x_test, y_test
 
-def train_model():
+def train_model_all_features():
 
     # Get Data
-    x_train, y_train, x_val, y_val, x_test, y_test = get_data()
+    x_train, y_train, x_val, y_val, _, _ = get_data()
 
     # Combine train and val for cross-validation
     x_train_val = np.vstack([x_train, x_val])
@@ -138,56 +147,9 @@ def train_model():
     return grid_search
 
 
-def test_model():
-    # Get Data
-    _, _, x_val, y_val, x_test, y_test = get_data()
-
-    # Load the best model
-    clf = joblib.load('rf_models/best_rf_all_features.pkl')
-
-    y_pred = clf.predict_proba(x_val)[:,1]
-    auc_val = roc_auc_score(y_val, y_pred)
-    ap_val = average_precision_score(y_val, y_pred)
-
-
-    # find threshold where sensitivity is >= 0.8
-    fpr, tpr, thresholds = roc_curve(y_val, y_pred)
-    sensitivity = tpr
-
-    for i, sens in enumerate(sensitivity):
-        if sens >= 0.8:
-            threshold = thresholds[i]
-            break
-
-    print('Rule-out Threshold:', threshold)
-
-    # find threshold where ppv is >= 0.8
-    
-    for thresh in reversed(thresholds):
-        ppv = precision_score(y_val, y_pred >= thresh)
-        if ppv >= 0.8:
-            threshold = thresh
-            break
-
-    print('Rule-in Threshold:', threshold)
-
-    y_pred = clf.predict_proba(x_test)[:,1]
-    auc_test = roc_auc_score(y_test, y_pred)
-    ap_test = average_precision_score(y_test, y_pred)
-
-    # harmonic mean of auc and ap
-    val_score = 2 * (auc_val * ap_val) / (auc_val + ap_val)
-    test_score = 2 * (auc_test * ap_test) / (auc_test + ap_test)
-
-    print('Val Score:', val_score)
-    print('Val AUC:', auc_val)
-    print('Val AP:', ap_val)
-    print('Test Score:', test_score)
-    print('Test AUC:', auc_test)
-    print('Test AP:', ap_test)
 
 
 if __name__ == '__main__':
 
-    train_model()
-    # test_model()
+    # train_models_all_features()
+    important_features, importance_scores = get_feature_importance()
