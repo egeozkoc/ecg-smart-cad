@@ -8,7 +8,7 @@ def get_feature_importance():
 
     feature_names = pd.read_csv('features.txt', header=None)[0].tolist()
     # Load the best model
-    clf = joblib.load('best_rf.pkl')
+    clf = joblib.load('rf_models/best_rf_all_features.pkl')
     
     # Get feature importance
     importances = clf.feature_importances_
@@ -69,10 +69,10 @@ def get_data():
 
 def evaluate_model():
     # Load the best model
-    clf = joblib.load('best_rf.pkl')
+    clf = joblib.load('rf_models/best_rf_all_features.pkl')
     
     # Load the best parameters
-    best_params = np.load('best_params.npy', allow_pickle=True).item()
+    best_params = clf.get_params()
     
     # Get data
     x_train, y_train, x_val, y_val, x_test, y_test = get_data()
@@ -178,7 +178,7 @@ if __name__ == '__main__':
     # Evaluate the model, get feature importance
     evaluate_model()
     important_features, importance_scores = get_feature_importance()
-    pd.DataFrame({'feature': important_features, 'importance': importance_scores}).to_csv(f'rf_feature_importance.csv', index=False)
+    pd.DataFrame({'feature': important_features, 'importance': importance_scores}).to_csv(f'rf_feature_importance_cross_validation.csv', index=False)
 
 
     
