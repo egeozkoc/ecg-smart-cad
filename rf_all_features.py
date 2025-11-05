@@ -78,7 +78,7 @@ def get_data():
 def train_model_all_features():
 
     # Get Data
-    x_train, y_train, x_val, y_val, _, _ = get_data()
+    x_train, y_train, x_val, y_val, x_test, y_test = get_data()
 
     # Combine train and val for cross-validation
     x_train_val = np.vstack([x_train, x_val])
