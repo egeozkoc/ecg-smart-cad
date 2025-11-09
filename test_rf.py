@@ -7,14 +7,15 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import (roc_auc_score, average_precision_score, accuracy_score, 
                               precision_score, recall_score, f1_score, roc_curve, confusion_matrix)
+from sklearn.model_selection import StratifiedKFold
 
 
 def get_data(num_features):
     """Load feature-based data for RF model evaluation.
     
     Returns:
-        x_val: validation features
-        y_val: validation labels
+        x_train_val: combined train+val features (for CV)
+        y_train_val: combined train+val labels (for CV)
         x_test: test features
         y_test: test labels
     """
@@ -24,13 +25,28 @@ def get_data(num_features):
     # Use the same features file as training
     features = pd.read_csv('results/features.csv')
 
-
+    train_df = pd.read_csv('train_set.csv')
     val_df = pd.read_csv('val_set.csv')
     test_df = pd.read_csv('test_set.csv')
+    
+    y_train = train_df['label'].to_numpy()
     y_val = val_df['label'].to_numpy()
     y_test = test_df['label'].to_numpy()
+    
+    train_ids = train_df['ID'].to_list()
     val_ids = val_df['ID'].to_list()
     test_ids = test_df['ID'].to_list()
+
+    # Get training data
+    x_train = []
+    for id in train_ids:
+        features_id = features[features['Unnamed: 0'] == id]
+        features_id = features_id.drop(columns=['Unnamed: 0'])
+        # Keep only the desired features and enforce ordering
+        features_id = features_id[feature_names]
+        x_train.append(features_id.to_numpy())
+    x_train = np.concatenate(x_train, axis=0)
+    print(f"Train set: {len(x_train)} samples loaded")
 
     # Get validation data
     x_val = []
@@ -54,7 +70,47 @@ def get_data(num_features):
     x_test = np.concatenate(x_test, axis=0)
     print(f"Test set: {len(x_test)} samples loaded")
 
-    return x_val, y_val, x_test, y_test
+    # Combine train and val for cross-validation (same as in training)
+    x_train_val = np.vstack([x_train, x_val])
+    y_train_val = np.concatenate([y_train, y_val])
+    print(f"Combined train+val set: {len(x_train_val)} samples")
+
+    return x_train_val, y_train_val, x_test, y_test
+
+
+def get_cv_predictions(clf, x_train_val, y_train_val, n_splits=5):
+    """Generate out-of-fold predictions using stratified k-fold CV.
+    
+    This mimics the cross-validation approach used during training with GridSearchCV.
+    
+    Args:
+        clf: Trained classifier
+        x_train_val: Combined train+val features
+        y_train_val: Combined train+val labels
+        n_splits: Number of CV folds (default: 5, matching training)
+    
+    Returns:
+        y_cv_prob: Out-of-fold probability predictions for entire train+val set
+    """
+    stratified_cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    y_cv_prob = np.zeros(len(y_train_val))
+    
+    print(f'Performing {n_splits}-fold stratified CV to get validation predictions...')
+    for fold_idx, (train_idx, val_idx) in enumerate(stratified_cv.split(x_train_val, y_train_val)):
+        x_fold_train, x_fold_val = x_train_val[train_idx], x_train_val[val_idx]
+        y_fold_train = y_train_val[train_idx]
+        
+        # Clone and retrain the model on this fold
+        # Use the same parameters as the loaded model
+        fold_clf = clf.__class__(**clf.get_params())
+        fold_clf.fit(x_fold_train, y_fold_train)
+        
+        # Get predictions for validation fold
+        y_cv_prob[val_idx] = fold_clf.predict_proba(x_fold_val)[:, 1]
+        print(f'  Fold {fold_idx + 1}/{n_splits} complete')
+    
+    print('✓ CV predictions generated')
+    return y_cv_prob
 
 
 def find_thresholds_from_val(y_true, y_prob_pos):
@@ -219,10 +275,10 @@ def main():
         print('=' * 80)
         
         # Load data
-        print('\nLoading validation and test data...')
+        print('\nLoading train+val (for CV) and test data...')
         num_features = file.stem.split('_')[-1]
         num_features = int(num_features)
-        x_val, y_val, x_test, y_test = get_data(num_features)
+        x_train_val, y_train_val, x_test, y_test = get_data(num_features)
         print('✓ Data loaded successfully')
         
         # Load RF model
@@ -230,25 +286,28 @@ def main():
         clf = joblib.load(model_path)
         print('✓ Model loaded successfully')
         
-        # Get predictions
-        print('\nGenerating predictions...')
-        y_val_prob = clf.predict_proba(x_val)[:, 1]
-        y_test_prob = clf.predict_proba(x_test)[:, 1]
-        print('✓ Predictions generated')
+        # Get CV predictions for validation (mimics GridSearchCV from training)
+        print('\nGenerating validation predictions using 5-fold stratified CV...')
+        y_val_prob = get_cv_predictions(clf, x_train_val, y_train_val, n_splits=5)
         
-        # Derive thresholds from validation split
-        print('\nFinding optimal thresholds...')
-        rule_out_thresh, rule_in_thresh, f1_thresh = find_thresholds_from_val(y_val, y_val_prob)
+        # Get test predictions using the loaded model (trained on full train+val)
+        print('\nGenerating test predictions...')
+        y_test_prob = clf.predict_proba(x_test)[:, 1]
+        print('✓ Test predictions generated')
+        
+        # Derive thresholds from CV validation predictions
+        print('\nFinding optimal thresholds from CV predictions...')
+        rule_out_thresh, rule_in_thresh, f1_thresh = find_thresholds_from_val(y_train_val, y_val_prob)
         print(f'✓ Thresholds found (F1 thresh: {f1_thresh:.3f})')
         
-        # Compute validation metrics at F1 threshold
-        print('\nComputing validation metrics...')
-        val_metrics = compute_metrics(y_val, y_val_prob, f1_thresh)
+        # Compute validation metrics at F1 threshold using CV predictions
+        print('\nComputing validation metrics from CV predictions...')
+        val_metrics = compute_metrics(y_train_val, y_val_prob, f1_thresh)
         print('Computing validation bootstrap CIs (200 iterations)...')
-        val_ci = bootstrap_ci_val(y_val, y_val_prob)
+        val_ci = bootstrap_ci_val(y_train_val, y_val_prob)
         print('✓ Validation metrics complete')
 
-        # Test metrics at F1-optimal threshold (from validation set)
+        # Test metrics at F1-optimal threshold (from CV validation)
         print('\nComputing test metrics...')
         test_metrics = compute_metrics(y_test, y_test_prob, f1_thresh)
         print('Computing test bootstrap CIs (200 iterations)...')
@@ -323,8 +382,9 @@ def main():
         print(f"✓ Probabilities saved to rf_results/{model_name}_*_probabilities.npy")
 
         # Save plots (combined val+test ROC and confusion matrix)
+        # Note: y_val_prob are CV predictions on train+val set, y_test_prob are predictions on test set
         plot_val_test_roc(
-            y_val,
+            y_train_val,
             y_val_prob,
             y_test,
             y_test_prob,
