@@ -19,7 +19,7 @@ def get_data(num_features):
         y_test: test labels
     """
     
-    feature_importance = pd.read_csv('rf_feature_importance.csv')
+    feature_importance = pd.read_csv('rf_feature_importance_cross_validation.csv')
     feature_names = feature_importance['feature'].tolist()[:num_features]
     # Use the same features file as training
     features = pd.read_csv('results/features.csv')
