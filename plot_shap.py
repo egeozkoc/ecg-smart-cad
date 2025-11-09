@@ -131,18 +131,25 @@ def create_shap_plots(model_path, num_features, max_display=20):
     top_features_idx = np.argsort(mean_abs_shap)[::-1][:5]
     
     for i, feat_idx in enumerate(top_features_idx):
-        plt.figure(figsize=(10, 6))
-        shap.dependence_plot(feat_idx, shap_values_pos, x_test,
-                            feature_names=feature_names,
-                            show=False)
-        plt.title(f'SHAP Dependence Plot - {feature_names[feat_idx]}', 
-                  fontsize=14, pad=20)
-        plt.tight_layout()
-        safe_feature_name = feature_names[feat_idx].replace('/', '_').replace(' ', '_')
-        plt.savefig(f'rf_shap_plots/{model_name}_dependence_{i+1}_{safe_feature_name}.png',
-                    dpi=300, bbox_inches='tight')
-        plt.close()
-    print(f"✓ Top 5 dependence plots saved")
+        try:
+            plt.figure(figsize=(10, 6))
+            # Set interaction_index=None to avoid the ambiguous array error
+            shap.dependence_plot(feat_idx, shap_values_pos, x_test,
+                                feature_names=feature_names,
+                                interaction_index=None,
+                                show=False)
+            plt.title(f'SHAP Dependence Plot - {feature_names[feat_idx]}', 
+                      fontsize=14, pad=20)
+            plt.tight_layout()
+            safe_feature_name = feature_names[feat_idx].replace('/', '_').replace(' ', '_')
+            plt.savefig(f'rf_shap_plots/{model_name}_dependence_{i+1}_{safe_feature_name}.png',
+                        dpi=300, bbox_inches='tight')
+            plt.close()
+        except Exception as e:
+            print(f"  ⚠ Warning: Could not create dependence plot for {feature_names[feat_idx]}: {str(e)}")
+            plt.close()
+            continue
+    print(f"✓ Dependence plots saved")
     
     # ============================================
     # 4. Waterfall Plot - Example predictions
