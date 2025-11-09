@@ -226,7 +226,9 @@ def train_models_selected_features(num_features):
 if __name__ == '__main__':
 
     # train_models_all_features()
+
     # important_features, importance_scores = get_feature_importance()
     # pd.DataFrame({'feature': important_features, 'importance': importance_scores}).to_csv(f'rf_feature_importance_cross_validation.csv', index=False)
+    
     for num_features in [25, 50, 75, 100, 150]:
         train_models_selected_features(num_features)
