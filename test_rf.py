@@ -314,13 +314,13 @@ def main():
             ['Test NPV', r3(test_metrics['npv']), r3(test_ci['npv'][0]), r3(test_ci['npv'][1])],
         ]
         metrics_df = pd.DataFrame(rows, columns=['Metric', 'Value', 'CI_low', 'CI_high'])
-        metrics_df.to_csv(f'test_results/{model_name}_results.csv', index=False)
-        print(f"✓ Results CSV saved to: test_results/{model_name}_results.csv")
+        metrics_df.to_csv(f'rf_results/{model_name}_results.csv', index=False)
+        print(f"✓ Results CSV saved to: rf_results/{model_name}_results.csv")
 
         # Save probabilities as .npy files
-        np.save(f'test_results/{model_name}_val_probabilities.npy', y_val_prob)
-        np.save(f'test_results/{model_name}_test_probabilities.npy', y_test_prob)
-        print(f"✓ Probabilities saved to test_results/{model_name}_*_probabilities.npy")
+        np.save(f'rf_results/{model_name}_val_probabilities.npy', y_val_prob)
+        np.save(f'rf_results/{model_name}_test_probabilities.npy', y_test_prob)
+        print(f"✓ Probabilities saved to rf_results/{model_name}_*_probabilities.npy")
 
         # Save plots (combined val+test ROC and confusion matrix)
         plot_val_test_roc(
@@ -329,9 +329,9 @@ def main():
             y_test,
             y_test_prob,
             model_name,
-            f'test_results/{model_name}_roc.png'
+            f'rf_results/{model_name}_roc.png'
         )
-        plot_confusion_matrix(cm, model_name, f'test_results/{model_name}_cm.png')
+        plot_confusion_matrix(cm, model_name, f'rf_results/{model_name}_cm.png')
         
         print('\n' + '=' * 80)
         print('Evaluation Complete!')
