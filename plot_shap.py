@@ -132,6 +132,8 @@ def create_shap_plots(model_path, num_features, max_display=20):
     
     for i, feat_idx in enumerate(top_features_idx):
         try:
+            # Convert numpy int to Python int to avoid indexing issues
+            feat_idx = int(feat_idx)
             plt.figure(figsize=(10, 6))
             # Set interaction_index=None to avoid the ambiguous array error
             shap.dependence_plot(feat_idx, shap_values_pos, x_test,
@@ -146,7 +148,7 @@ def create_shap_plots(model_path, num_features, max_display=20):
                         dpi=300, bbox_inches='tight')
             plt.close()
         except Exception as e:
-            print(f"  ⚠ Warning: Could not create dependence plot for {feature_names[feat_idx]}: {str(e)}")
+            print(f"  ⚠ Warning: Could not create dependence plot for feature {i+1}: {str(e)}")
             plt.close()
             continue
     print(f"✓ Dependence plots saved")
