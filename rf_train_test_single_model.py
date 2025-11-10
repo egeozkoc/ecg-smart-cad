@@ -265,15 +265,15 @@ def main():
     num_features = 50  # Number of top features to use
     
     hyperparameters = {
-        'n_estimators': 100,
-        'class_weight': 'balanced_subsample',
-        'criterion': 'entropy',
-        'max_features': 'sqrt',
-        'min_samples_split': 0.005,
-        'min_samples_leaf': 0.001,
+        'n_estimators': 50,
+        'class_weight': 'balanced',
+        'criterion': 'gini',
+        'max_features': 'log2',
+        'min_samples_split': 0.001,
+        'min_samples_leaf': 0.005,
         'min_impurity_decrease': 0.0,
-        'ccp_alpha': 0.0,
-        'max_samples': 0.75,
+        'ccp_alpha': 0.005,
+        'max_samples': 1.0,
         'n_jobs': 1,
         'random_state': 42,
         'bootstrap': True,
