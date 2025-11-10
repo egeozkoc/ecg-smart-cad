@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
+import shap
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (roc_auc_score, average_precision_score, accuracy_score, 
                               precision_score, recall_score, f1_score, roc_curve, 
@@ -23,6 +24,7 @@ def get_data(num_features=None):
         y_train_val: combined train+val labels
         x_test: test features
         y_test: test labels
+        feature_names: list of feature names used
     """
     
     feature_importance = pd.read_csv('rf_feature_importance_cross_validation.csv')
@@ -77,7 +79,7 @@ def get_data(num_features=None):
     x_train_val = np.vstack([x_train, x_val])
     y_train_val = np.concatenate([y_train, y_val])
 
-    return x_train_val, y_train_val, x_test, y_test
+    return x_train_val, y_train_val, x_test, y_test, feature_names
 
 
 def get_cv_predictions(clf, x_train_val, y_train_val, n_splits=5):
@@ -283,6 +285,51 @@ def plot_confusion_matrix(cm, model_name, save_path):
     print(f"Confusion matrix saved to: {save_path}")
 
 
+def plot_shap_summary(clf, x_data, feature_names, model_name, save_path, max_display=20):
+    """Generate and save SHAP beeswarm plot.
+    
+    Args:
+        clf: Trained classifier
+        x_data: Feature data to compute SHAP values on
+        feature_names: List of feature names
+        model_name: Name of the model for the title
+        save_path: Path to save the plot
+        max_display: Maximum number of features to display (default: 20)
+    """
+    print(f'\nGenerating SHAP values for {len(x_data)} samples...')
+    
+    # Create SHAP explainer for tree-based model
+    explainer = shap.TreeExplainer(clf)
+    
+    # Compute SHAP values
+    shap_values = explainer.shap_values(x_data)
+    
+    # For binary classification, shap_values might be a list [class_0, class_1]
+    # We want the positive class (class 1)
+    if isinstance(shap_values, list):
+        shap_values = shap_values[1]
+    
+    print('✓ SHAP values computed')
+    print('Creating SHAP summary plot...')
+    
+    # Create the beeswarm plot
+    plt.figure(figsize=(10, max(8, max_display * 0.4)))
+    shap.summary_plot(
+        shap_values, 
+        x_data,
+        feature_names=feature_names,
+        max_display=max_display,
+        show=False,
+        plot_size=(10, max(8, max_display * 0.4))
+    )
+    
+    plt.title(f'SHAP Feature Importance - {model_name}', fontsize=14, pad=20)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"✓ SHAP summary plot saved to: {save_path}")
+
+
 def main():
     # ========================================================================
     # HARDCODED HYPERPARAMETERS - MODIFY THESE TO TEST DIFFERENT MODELS
@@ -321,7 +368,7 @@ def main():
     print('\n' + '=' * 80)
     print('STEP 1: Loading Data')
     print('=' * 80)
-    x_train_val, y_train_val, x_test, y_test = get_data(num_features)
+    x_train_val, y_train_val, x_test, y_test, feature_names = get_data(num_features)
     print(f'Train+Val samples: {len(x_train_val)}')
     print(f'Test samples: {len(x_test)}')
     print(f'Features: {x_train_val.shape[1]}')
@@ -467,6 +514,19 @@ def main():
         f'rf_results/{model_name}_roc.png'
     )
     plot_confusion_matrix(cm, model_name, f'rf_results/{model_name}_cm.png')
+    
+    # Generate SHAP summary plot on test set
+    print('\n' + '=' * 80)
+    print('STEP 5: Generating SHAP Explanations')
+    print('=' * 80)
+    plot_shap_summary(
+        clf,
+        x_test,
+        feature_names,
+        model_name,
+        f'rf_results/{model_name}_shap.png',
+        max_display=20
+    )
     
     print('\n' + '=' * 80)
     print('COMPLETE!')
