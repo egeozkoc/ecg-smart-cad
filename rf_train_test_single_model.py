@@ -11,11 +11,11 @@ from sklearn.metrics import (roc_auc_score, average_precision_score, accuracy_sc
 from sklearn.model_selection import StratifiedKFold
 
 
-def get_data(num_features):
+def get_data(num_features=None):
     """Load feature-based data for RF model training and evaluation.
     
     Args:
-        num_features: Number of top features to use
+        num_features: Number of top features to use. If None, uses all features.
     
     Returns:
         x_train_val: combined train+val features
@@ -25,7 +25,10 @@ def get_data(num_features):
     """
     
     feature_importance = pd.read_csv('rf_feature_importance_cross_validation.csv')
-    feature_names = feature_importance['feature'].tolist()[:num_features]
+    if num_features is None:
+        feature_names = feature_importance['feature'].tolist()
+    else:
+        feature_names = feature_importance['feature'].tolist()[:num_features]
     
     # Use the same features file as training
     features = pd.read_csv('results/features.csv')
@@ -168,7 +171,7 @@ def compute_metrics(y_true, y_prob_pos, threshold):
     }
 
 
-def bootstrap_ci_val(y_true, y_prob_pos, n_boot=200, seed=42):
+def bootstrap_ci_val(y_true, y_prob_pos, n_boot=100, seed=42):
     """Bootstrap 95% CIs for validation metrics, recomputing F1 threshold per resample."""
     rng = np.random.default_rng(seed)
     metrics = {'auc': [], 'ap': [], 'f1': [], 'sens': [], 'spec': [], 'acc': [], 'ppv': [], 'npv': []}
@@ -188,7 +191,7 @@ def bootstrap_ci_val(y_true, y_prob_pos, n_boot=200, seed=42):
     return ci
 
 
-def bootstrap_ci_test(y_true, y_prob_pos, threshold=0.5, n_boot=200, seed=42):
+def bootstrap_ci_test(y_true, y_prob_pos, threshold=0.5, n_boot=100, seed=42):
     """Bootstrap 95% CIs for test metrics at a fixed threshold."""
     rng = np.random.default_rng(seed)
     metrics = {'auc': [], 'ap': [], 'f1': [], 'sens': [], 'spec': [], 'acc': [], 'ppv': [], 'npv': []}
@@ -262,7 +265,7 @@ def main():
     # ========================================================================
     # HARDCODED HYPERPARAMETERS - MODIFY THESE TO TEST DIFFERENT MODELS
     # ========================================================================
-    num_features = 50  # Number of top features to use
+    num_features = None  # Number of top features to use (None = all features)
     
     hyperparameters = {
         'n_estimators': 50,
@@ -281,13 +284,13 @@ def main():
     }
     # ========================================================================
     
-    model_name = f'rf_custom_{num_features}_features'
+    model_name = f'rf_custom_{"all" if num_features is None else num_features}_features'
     
     print('=' * 80)
     print('Random Forest Model Training and Evaluation')
     print('=' * 80)
     print(f'\nModel: {model_name}')
-    print(f'Number of features: {num_features}')
+    print(f'Number of features: {"all" if num_features is None else num_features}')
     print('\nHyperparameters:')
     for key, value in hyperparameters.items():
         print(f'  {key}: {value}')
@@ -354,14 +357,14 @@ def main():
     # Compute validation metrics
     print('\nComputing validation metrics from CV predictions...')
     val_metrics = compute_metrics(y_train_val, y_val_prob, f1_thresh)
-    print('Computing validation bootstrap CIs (200 iterations)...')
+    print('Computing validation bootstrap CIs (100 iterations)...')
     val_ci = bootstrap_ci_val(y_train_val, y_val_prob)
     print('✓ Validation metrics complete')
 
     # Compute test metrics
     print('\nComputing test metrics...')
     test_metrics = compute_metrics(y_test, y_test_prob, f1_thresh)
-    print('Computing test bootstrap CIs (200 iterations)...')
+    print('Computing test bootstrap CIs (100 iterations)...')
     test_ci = bootstrap_ci_test(y_test, y_test_prob, f1_thresh)
     print('✓ Test metrics complete')
 
