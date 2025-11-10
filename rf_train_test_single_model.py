@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (roc_auc_score, average_precision_score, accuracy_score, 
-                              precision_score, recall_score, f1_score, roc_curve, confusion_matrix)
+                              precision_score, recall_score, f1_score, roc_curve, 
+                              precision_recall_curve, confusion_matrix)
 from sklearn.model_selection import StratifiedKFold
 
 
@@ -222,28 +223,49 @@ def r3(x):
 
 
 def plot_val_test_roc(y_val_true, y_val_prob, y_test_true, y_test_prob, model_name, save_path):
-    """Plot validation and test ROC curves on the same figure and save."""
+    """Plot validation and test ROC and Precision-Recall curves side by side and save."""
+    # ROC curve data
     fpr_v, tpr_v, _ = roc_curve(y_val_true, y_val_prob)
     auc_v = roc_auc_score(y_val_true, y_val_prob)
-
     fpr_t, tpr_t, _ = roc_curve(y_test_true, y_test_prob)
     auc_t = roc_auc_score(y_test_true, y_test_prob)
 
-    plt.figure(figsize=(10, 8))
-    plt.plot(fpr_t, tpr_t, color='tab:blue', lw=2, label=f'Test ROC (AUC = {auc_t:.3f})')
-    plt.plot(fpr_v, tpr_v, color='tab:orange', lw=2, linestyle='--', label=f'Val ROC (AUC = {auc_v:.3f})')
-    plt.plot([0, 1], [0, 1], color='gray', lw=1, linestyle=':')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title(f'ROC Curves - {model_name}')
-    plt.legend(loc="lower right")
-    plt.grid(True, alpha=0.3)
+    # Precision-Recall curve data
+    prec_v, rec_v, _ = precision_recall_curve(y_val_true, y_val_prob)
+    ap_v = average_precision_score(y_val_true, y_val_prob)
+    prec_t, rec_t, _ = precision_recall_curve(y_test_true, y_test_prob)
+    ap_t = average_precision_score(y_test_true, y_test_prob)
 
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+    # ROC Curve subplot
+    ax1.plot(fpr_t, tpr_t, color='tab:blue', lw=2, label=f'Test ROC (AUC = {auc_t:.3f})')
+    ax1.plot(fpr_v, tpr_v, color='tab:orange', lw=2, linestyle='--', label=f'Val ROC (AUC = {auc_v:.3f})')
+    ax1.plot([0, 1], [0, 1], color='gray', lw=1, linestyle=':')
+    ax1.set_xlim([0.0, 1.0])
+    ax1.set_ylim([0.0, 1.05])
+    ax1.set_xlabel('False Positive Rate')
+    ax1.set_ylabel('True Positive Rate')
+    ax1.set_title(f'ROC Curves - {model_name}')
+    ax1.legend(loc="lower right")
+    ax1.grid(True, alpha=0.3)
+
+    # Precision-Recall Curve subplot
+    ax2.plot(rec_t, prec_t, color='tab:blue', lw=2, label=f'Test PR (AP = {ap_t:.3f})')
+    ax2.plot(rec_v, prec_v, color='tab:orange', lw=2, linestyle='--', label=f'Val PR (AP = {ap_v:.3f})')
+    ax2.set_xlim([0.0, 1.0])
+    ax2.set_ylim([0.0, 1.05])
+    ax2.set_xlabel('Recall')
+    ax2.set_ylabel('Precision')
+    ax2.set_title(f'Precision-Recall Curves - {model_name}')
+    ax2.legend(loc="best")
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"Val+Test ROC curves saved to: {save_path}")
+    print(f"Val+Test ROC and PR curves saved to: {save_path}")
 
 
 def plot_confusion_matrix(cm, model_name, save_path):
