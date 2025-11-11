@@ -525,7 +525,7 @@ def main():
         feature_names,
         model_name,
         f'rf_results/{model_name}_shap.png',
-        max_display=20
+        max_display=10
     )
     
     print('\n' + '=' * 80)
