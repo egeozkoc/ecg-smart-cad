@@ -337,7 +337,7 @@ def main():
     num_features = None  # Number of top features to use (None = all features)
     
     hyperparameters = {
-        'n_estimators': 50,
+        'n_estimators': 500,
         'class_weight': 'balanced',
         'criterion': 'gini',
         'max_features': 'log2',
