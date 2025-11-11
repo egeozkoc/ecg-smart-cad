@@ -11,8 +11,11 @@ from sklearn.metrics import (roc_auc_score, average_precision_score, accuracy_sc
                               precision_score, recall_score, f1_score, roc_curve, confusion_matrix)
 
 
-def get_rf_data():
+def get_rf_data(num_features=None):
     """Load feature-based data for RF model.
+    
+    Args:
+        num_features: Number of top features to use. If None, uses all features from features.txt
     
     Returns:
         x_val: validation features
@@ -23,8 +26,13 @@ def get_rf_data():
     # Use the same features file as training
     features = pd.read_csv('results/features.csv')
 
-    # Load feature names from single text file (one feature per line)
-    feature_names = pd.read_csv('features.txt', header=None)[0].tolist()
+    # Load feature names based on num_features parameter
+    if num_features is None:
+        # Load all features from features.txt
+        feature_names = pd.read_csv('features.txt', header=None)[0].tolist()
+    else:
+        # Load top N features from feature importance ranking
+        feature_names = pd.read_csv('rf_feature_importance_cross_validation.csv')['feature'].tolist()[:num_features]
 
     val_df = pd.read_csv('val_set.csv')
     test_df = pd.read_csv('test_set.csv')
@@ -336,14 +344,29 @@ def main():
     print('Combining Random Forest and Deep Learning Models')
     print('=' * 80)
     
+    # ============ Configuration ============
+    # Set num_features to match your RF model:
+    # - None: uses all features (for models trained on all features)
+    # - Integer (e.g., 150): uses top N features (for models trained on selected features)
+    num_features = 150  # Change this to match your RF model
+    
     # ============ Define Model Paths ============
-    rf_model_path = 'rf_models/best_rf_selected_features_150.pkl'
+    if num_features is None:
+        rf_model_path = 'rf_models/best_rf_all_features.pkl'
+    else:
+        rf_model_path = f'rf_models/best_rf_selected_features_{num_features}.pkl'
+    
     dl_model_path = 'models/ecgsmartnet_CAD__2025-10-28-23-56-52.pt'
+    
+    print(f'\nConfiguration:')
+    print(f'  RF Model: {rf_model_path}')
+    print(f'  DL Model: {dl_model_path}')
+    print(f'  Number of features: {num_features if num_features else "all"}')
     
     # ============ Load Data ============
     print('\n[1/6] Loading data...')
     print('\nLoading RF data:')
-    x_val_rf, y_val, x_test_rf, y_test = get_rf_data()
+    x_val_rf, y_val, x_test_rf, y_test = get_rf_data(num_features)
     
     print('\nLoading DL data:')
     x_val_dl, y_val_dl, x_test_dl, y_test_dl = get_dl_data()
@@ -462,7 +485,9 @@ def main():
     # ============ Print Results ============
     print('\n' + '=' * 80)
     print('FUSION MODEL RESULTS')
+    feature_info = f'{num_features} features' if num_features else 'all features'
     print(f'Fusion Strategy: Weighted Average (RF={best_weight_rf:.3f}, DL={weight_dl:.3f})')
+    print(f'RF Features Used: {feature_info}')
     print('-' * 80)
     print(f"Rule Out Thresh\nSens > 0.90\n{r3(rule_out_thresh) if rule_out_thresh is not None else 'N/A'}")
     print(f"Rule In Thresh\nPPV > 0.85\n{r3(rule_in_thresh) if rule_in_thresh is not None else 'N/A'}")
@@ -490,11 +515,16 @@ def main():
     # ============ Save Results ============
     print('\nSaving results...')
     os.makedirs('test_results', exist_ok=True)
-    model_name = 'fusion_model'
+    if num_features is None:
+        model_name = 'fusion_model_all_features'
+    else:
+        model_name = f'fusion_model_{num_features}_features'
 
     # Save metrics table to CSV in the displayed order, with CI columns (rounded to 3 decimals)
+    feature_info = f'{num_features} features' if num_features else 'all features'
     rows = [
         ['Fusion Strategy', f'Weighted (RF={best_weight_rf:.3f}, DL={weight_dl:.3f})', None, None],
+        ['RF Features Used', feature_info, None, None],
         ['Rule Out Thresh (Sens > 0.90)', r3(rule_out_thresh), None, None],
         ['Rule In Thresh (PPV > 0.85)', r3(rule_in_thresh), None, None],
         ['F1 Thresh', r3(f1_thresh), None, None],
