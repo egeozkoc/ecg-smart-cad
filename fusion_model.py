@@ -333,8 +333,8 @@ def main():
     print('=' * 80)
     
     # ============ Define Model Paths ============
-    rf_model_path = 'best_rf.pkl'
-    dl_model_path = 'models/ecgsmartnet_se_CAD_random_2025-10-21-00-10-53.pt'
+    rf_model_path = 'best_rf_selected_features_150.pkl'
+    dl_model_path = 'models/ecgsmartnet_CAD__2025-10-28-23-56-52.pt'
     
     # ============ Load Data ============
     print('\n[1/6] Loading data...')
