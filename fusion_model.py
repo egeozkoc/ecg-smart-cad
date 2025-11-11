@@ -40,8 +40,10 @@ def get_rf_data():
         features_id = features_id.drop(columns=['Unnamed: 0'])
         # Keep only the desired features and enforce ordering
         features_id = features_id[feature_names]
+        # Convert to numeric, coercing errors to NaN, then fill NaN with 0
+        features_id = features_id.apply(pd.to_numeric, errors='coerce').fillna(0)
         x_val.append(features_id.to_numpy())
-    x_val = np.concatenate(x_val, axis=0)
+    x_val = np.concatenate(x_val, axis=0).astype(float)  # Ensure float dtype
     print(f"RF - Val set: {len(x_val)} samples loaded")
 
     # Get test data
@@ -51,8 +53,10 @@ def get_rf_data():
         features_id = features_id.drop(columns=['Unnamed: 0'])
         # Keep only the desired features and enforce ordering
         features_id = features_id[feature_names]
+        # Convert to numeric, coercing errors to NaN, then fill NaN with 0
+        features_id = features_id.apply(pd.to_numeric, errors='coerce').fillna(0)
         x_test.append(features_id.to_numpy())
-    x_test = np.concatenate(x_test, axis=0)
+    x_test = np.concatenate(x_test, axis=0).astype(float)  # Ensure float dtype
     print(f"RF - Test set: {len(x_test)} samples loaded")
 
     return x_val, y_val, x_test, y_test
