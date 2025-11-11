@@ -356,7 +356,7 @@ def main():
     else:
         rf_model_path = f'rf_models/best_rf_selected_features_{num_features}.pkl'
     
-    dl_model_path = 'models/ecgsmartnet_CAD__2025-10-28-23-56-52.pt'
+    dl_model_path = 'models/ecgsmartnet_CAD__2025-11-03-11-11-52.pt'
     
     print(f'\nConfiguration:')
     print(f'  RF Model: {rf_model_path}')
