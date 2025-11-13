@@ -23,7 +23,7 @@ def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, u
 
     for (x, y) in train_dataloader:
 
-        # undersample the No ACS class
+        # undersample the No CAD class
         indices0 = np.where(y == 0)[0]
         indices1 = np.where(y == 1)[0]
         num_samples = np.min([len(indices1), len(indices0)])
@@ -171,17 +171,52 @@ def get_data(path):
 
     return train_data, train_outcomes, val_data, val_outcomes
 
+
+def freeze_all_except_fc(model):
+    """
+    Freeze all layers in the model except the final fully connected layer (fc).
+    """
+    # First, freeze all parameters
+    for param in model.parameters():
+        param.requires_grad = False
+    
+    # Then, unfreeze only the fc layer
+    for param in model.fc.parameters():
+        param.requires_grad = True
+    
+    print("All layers frozen except the final fully connected layer (fc)")
+    
+    # Print trainable parameters summary
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100*trainable_params/total_params:.2f}%)")
+    
+
 if __name__ == '__main__':
 
+    # Path to preprocessed CAD data
     path = 'cad_dataset_preprocessed/'
+    
+    # Path to pretrained ACS model - USER SHOULD SET THIS
+    pretrained_model_path = 'models/ecgsmartnet_acs_2025-04-13-00-56-22.pt'
+
     
     os.makedirs('models', exist_ok=True)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
 
+    # Load pretrained ACS model
+    print(f"Loading pretrained ACS model from: {pretrained_model_path}")
+    model = torch.load(pretrained_model_path, map_location=device)
+    print("Model loaded successfully")
+    
+    # Freeze all layers except fc
+    freeze_all_except_fc(model)
+    
+    # Load CAD data
+    print("Loading CAD dataset...")
     x_train, y_train, x_val, y_val = get_data(path)
-
 
     x_train = torch.tensor(x_train, dtype=torch.float32)
     y_train = torch.tensor(y_train, dtype=torch.long)
@@ -192,7 +227,7 @@ if __name__ == '__main__':
     val_dataset = TensorDataset(x_val, y_val)
     num_epochs = 200
 
-
+    # Random search hyperparameter ranges
     lr0_min, lr0_max = 1e-4, 1e-1  # Initial learning rate range
     lr_min, lr_max = 1e-6, 1e-3    # Regular learning rate range
     wd_min, wd_max = 1e-5, 1e-1    # Weight decay range
@@ -218,22 +253,31 @@ if __name__ == '__main__':
         # Discrete uniform sampling for batch size
         bs = int(np.random.choice(bs_choices))
 
+        print(f'\n{"="*80}')
         print(f'Random search iteration: {count_search}/{n_random_search}')
         print(f'Sampled hyperparameters:')
         print(f'  lr0 (initial): {lr0:.6e}')
         print(f'  lr (main):     {lr:.6e}')
         print(f'  batch size:    {bs}')
         print(f'  weight decay:  {wd:.6e}')
+        print(f'{"="*80}')
         
         try:
             # Set random seeds for reproducibility of this specific run
             torch.random.manual_seed(count_search)
             np.random.seed(count_search)
 
+            # Reload the pretrained model for each iteration
+            model = torch.load(pretrained_model_path, map_location=device)
+            freeze_all_except_fc(model)
+            model = model.to(device)
+
+            # Get model name from the loaded model class
+            model_name = model.__class__.__name__
+            
             current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
-            model = ECGSMARTNET().to(device)
-            wandb.init(project='ecgsmartnet-cad-final', 
-                       config={'model': 'ECGSMARTNET', 
+            wandb.init(project='ecgsmartnet-cad-transfer-learning', 
+                       config={'model': model_name, 
                                'outcome': 'CAD', 
                                'optimizer': 'AdamW',
                                'num_epochs': 200,
@@ -241,30 +285,16 @@ if __name__ == '__main__':
                                'lr': lr,
                                'bs': bs,
                                'weight decay': wd,
+                               'pretrained_model': pretrained_model_path,
+                               'transfer_learning': True,
+                               'frozen_layers': 'all except fc',
                                'time': current_time
                         }
             )
 
-
-            # current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
-            # model = ECGSMARTNET_Attention(attention='se').to(device)
-            # wandb.init(project='ecgsmartnet-cad-random-search', 
-            #            config={'model': 'ECGSMARTNET_SE', 
-            #                    'outcome': 'CAD', 
-            #                    'optimizer': 'AdamW',
-            #                    'num_epochs': 200,
-            #                    'lr epoch0': lr0,
-            #                    'lr': lr,
-            #                    'bs': bs,
-            #                    'weight decay': wd,
-            #                    'attention': 'se',
-            #                    'time': current_time
-            #             }
-            # )
-
-
-
-            optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
+            # Only optimize the unfrozen parameters (fc layer)
+            optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), 
+                                         lr=lr, weight_decay=wd)
             criterion = torch.nn.CrossEntropyLoss()
             pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
             val_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device))
@@ -305,7 +335,7 @@ if __name__ == '__main__':
 
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
-                    model_filename = f'models/ecgsmartnet_CAD__{current_time}.pt'
+                    model_filename = f'models/transfer_learning_CAD__{current_time}.pt'
                     torch.save(model, model_filename)
                     wandb.run.summary['best_val_loss'] = val_loss
                     wandb.run.summary['best_val_auc'] = val_auc
@@ -316,6 +346,7 @@ if __name__ == '__main__':
                     count +=1
                 
                 if count == 10:
+                    print("Early stopping triggered (no improvement for 10 epochs)")
                     break
             
             wandb.finish()
@@ -346,3 +377,6 @@ if __name__ == '__main__':
                 pass
             
             continue
+    
+    print("\nTransfer learning complete!")
+
