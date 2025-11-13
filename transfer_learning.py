@@ -208,7 +208,7 @@ if __name__ == '__main__':
 
     # Load pretrained ACS model
     print(f"Loading pretrained ACS model from: {pretrained_model_path}")
-    model = torch.load(pretrained_model_path, map_location=device)
+    model = torch.load(pretrained_model_path, map_location=device, weights_only=False)
     print("Model loaded successfully")
     
     # Freeze all layers except fc
@@ -268,7 +268,7 @@ if __name__ == '__main__':
             np.random.seed(count_search)
 
             # Reload the pretrained model for each iteration
-            model = torch.load(pretrained_model_path, map_location=device)
+            model = torch.load(pretrained_model_path, map_location=device, weights_only=False)
             freeze_all_except_fc(model)
             model = model.to(device)
 
