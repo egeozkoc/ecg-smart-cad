@@ -3,14 +3,11 @@ from ecg_models import *
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_score, precision_score, recall_score, f1_score, roc_curve, precision_recall_curve
-import torchvision.models as models
+from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_score, precision_score, recall_score, f1_score
 from scipy import signal
 import pandas as pd
 import wandb
 import time
-import matplotlib.pyplot as plt
-from tkinter.filedialog import askdirectory
 
 
 def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, use_amp=True):
@@ -41,7 +38,7 @@ def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, u
             x = x.to(device)
             y = y.to(device)
 
-            with torch.amp.autocast(device_type='cuda', enabled=use_amp):
+            with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 y_pred = model(x)
                 loss = criterion(y_pred, y)
                 y_pred = torch.softmax(y_pred, dim=-1)
@@ -72,14 +69,15 @@ def train_epoch(model, device, train_dataloader, criterion, optimizer, scaler, u
     train_loss /= total_samples
 
     y_pred = y_pred[:, 1]
+    y_pred_binary = y_pred > 0.5
 
     auc = roc_auc_score(y, y_pred)
     ap = average_precision_score(y, y_pred)
-    acc = accuracy_score(y, y_pred > 0.5)
-    prec = precision_score(y, y_pred > 0.5)
-    rec = recall_score(y, y_pred > 0.5)
-    spec = recall_score(y, y_pred > 0.5, pos_label=0)
-    f1 = f1_score(y, y_pred > 0.5)
+    acc = accuracy_score(y, y_pred_binary)
+    prec = precision_score(y, y_pred_binary)
+    rec = recall_score(y, y_pred_binary)
+    spec = recall_score(y, y_pred_binary, pos_label=0)
+    f1 = f1_score(y, y_pred_binary)
 
     return train_loss, auc, acc, prec, rec, spec, f1, ap
 
@@ -97,7 +95,7 @@ def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
             y = y.to(device)
             x = torch.unsqueeze(x, 1)
 
-            with torch.amp.autocast(device_type='cuda', enabled=use_amp):
+            with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 y_pred = model(x)
                 loss = criterion(y_pred, y)
                 y_pred = torch.softmax(y_pred, dim=-1)
@@ -118,15 +116,15 @@ def val_epoch(model, device, val_dataloader, criterion, use_amp=True):
     val_loss /= total_samples
 
     y_pred = y_pred[:, 1]
-    
+    y_pred_binary = y_pred > 0.5
 
     auc = roc_auc_score(y, y_pred)
     ap = average_precision_score(y, y_pred)
-    acc = accuracy_score(y, y_pred > 0.5)
-    prec = precision_score(y, y_pred > 0.5)
-    rec = recall_score(y, y_pred > 0.5)
-    spec = recall_score(y, y_pred > 0.5, pos_label=0)
-    f1 = f1_score(y, y_pred > 0.5)
+    acc = accuracy_score(y, y_pred_binary)
+    prec = precision_score(y, y_pred_binary)
+    rec = recall_score(y, y_pred_binary)
+    spec = recall_score(y, y_pred_binary, pos_label=0)
+    f1 = f1_score(y, y_pred_binary)
 
     return val_loss, auc, acc, prec, rec, spec, f1, ap, y, y_pred
 
@@ -144,7 +142,7 @@ def get_data(path):
     train_data = []
     for id in train_ids:
 
-        ecg = np.load(path + id + '.npy', allow_pickle=True).item()
+        ecg = np.load(os.path.join(path, id + '.npy'), allow_pickle=True).item()
         ecg = ecg['waveforms']['ecg_median']
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
@@ -158,7 +156,7 @@ def get_data(path):
     val_data = []
     for id in val_ids:
 
-        ecg = np.load(path + id + '.npy', allow_pickle=True).item()
+        ecg = np.load(os.path.join(path, id + '.npy'), allow_pickle=True).item()
         ecg = ecg['waveforms']['ecg_median']
         ecg = ecg[:,150:-50]
         ecg = signal.resample(ecg, 200, axis=1)
@@ -172,7 +170,7 @@ def get_data(path):
     return train_data, train_outcomes, val_data, val_outcomes
 
 
-def freeze_all_except_fc(model):
+def freeze_all_except_fc(model, verbose=True):
     """
     Freeze all layers in the model except the final fully connected layer (fc).
     """
@@ -184,12 +182,21 @@ def freeze_all_except_fc(model):
     for param in model.fc.parameters():
         param.requires_grad = True
     
-    print("All layers frozen except the final fully connected layer (fc)")
-    
-    # Print trainable parameters summary
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100*trainable_params/total_params:.2f}%)")
+    if verbose:
+        # Print trainable parameters summary
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in model.parameters())
+        print(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100*trainable_params/total_params:.2f}%)")
+        
+        # Print detailed layer-by-layer status
+        print("\n" + "="*80)
+        print("Model layers and their freeze status:")
+        print("="*80)
+        for name, param in model.named_parameters():
+            status = "Trainable" if param.requires_grad else "Frozen"
+            num_params = param.numel()
+            print(f"{status:12} | {num_params:>10,} params | {name}")
+        print("="*80 + "\n")
     
 
 if __name__ == '__main__':
@@ -197,25 +204,15 @@ if __name__ == '__main__':
     # Path to preprocessed CAD data
     path = 'cad_dataset_preprocessed/'
     
-    # Path to pretrained ACS model - USER SHOULD SET THIS
+    # Path to pretrained model
     pretrained_model_path = 'models/ecgsmartnet_acs_2025-04-13-00-56-22.pt'
 
-    
     os.makedirs('models', exist_ok=True)
 
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
-
-    # Load pretrained ACS model
-    print(f"Loading pretrained ACS model from: {pretrained_model_path}")
-    model = torch.load(pretrained_model_path, map_location=device, weights_only=False)
-    print("Model loaded successfully")
-    
-    # Freeze all layers except fc
-    freeze_all_except_fc(model)
     
     # Load CAD data
-    print("Loading CAD dataset...")
     x_train, y_train, x_val, y_val = get_data(path)
 
     x_train = torch.tensor(x_train, dtype=torch.float32)
@@ -226,6 +223,9 @@ if __name__ == '__main__':
     train_dataset = TensorDataset(x_train, y_train)
     val_dataset = TensorDataset(x_val, y_val)
     num_epochs = 200
+    
+    # Calculate pos_weight (used for validation criterion)
+    pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
 
     # Random search hyperparameter ranges
     lr0_min, lr0_max = 1e-4, 1e-1  # Initial learning rate range
@@ -243,13 +243,14 @@ if __name__ == '__main__':
         if count_search < start_iteration:
             continue
         
-        np.random.seed(count_search * 42)  # Unique seed per iteration
+        # Set random seeds for reproducibility of this specific run
+        torch.manual_seed(count_search)
+        np.random.seed(count_search * 42)
         
         # Sample hyperparameters from continuous distributions
         lr0 = np.exp(np.random.uniform(np.log(lr0_min), np.log(lr0_max)))
         lr = np.exp(np.random.uniform(np.log(lr_min), np.log(lr_max)))
         wd = np.exp(np.random.uniform(np.log(wd_min), np.log(wd_max)))
-        
         # Discrete uniform sampling for batch size
         bs = int(np.random.choice(bs_choices))
 
@@ -263,14 +264,11 @@ if __name__ == '__main__':
         print(f'{"="*80}')
         
         try:
-            # Set random seeds for reproducibility of this specific run
-            torch.random.manual_seed(count_search)
-            np.random.seed(count_search)
 
-            # Reload the pretrained model for each iteration
+            # Reload the pretrained model for each iteration (to reset weights)
             model = torch.load(pretrained_model_path, map_location=device, weights_only=False)
-            freeze_all_except_fc(model)
-            model = model.to(device)
+            # Print layer status only on first iteration
+            freeze_all_except_fc(model, verbose=(count_search == start_iteration))
 
             # Get model name from the loaded model class
             model_name = model.__class__.__name__
@@ -280,7 +278,7 @@ if __name__ == '__main__':
                        config={'model': model_name, 
                                'outcome': 'CAD', 
                                'optimizer': 'AdamW',
-                               'num_epochs': 200,
+                               'num_epochs': num_epochs,
                                'lr epoch0': lr0,
                                'lr': lr,
                                'bs': bs,
@@ -293,28 +291,30 @@ if __name__ == '__main__':
             )
 
             # Only optimize the unfrozen parameters (fc layer)
+            # Initialize with lr0 for first epoch, will be changed to lr after epoch 0
             optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), 
-                                         lr=lr, weight_decay=wd)
+                                         lr=lr0, weight_decay=wd)
             criterion = torch.nn.CrossEntropyLoss()
-            pos_weight = torch.sum(y_val == 0) / torch.sum(y_val == 1)
             val_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device))
             
 
             use_amp = device.type == 'cuda'
             scaler = torch.amp.GradScaler(enabled=use_amp)
 
+            # Set num_workers based on platform (Windows can have issues with multiprocessing)
+            num_workers = 0 if os.name == 'nt' else 4
             train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True, 
-                                      num_workers=4, pin_memory=True, persistent_workers=True)
+                                      num_workers=num_workers, pin_memory=True, 
+                                      persistent_workers=(num_workers > 0))
             val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False,
-                                    num_workers=2, pin_memory=True, persistent_workers=True)
+                                    num_workers=num_workers, pin_memory=True, 
+                                    persistent_workers=(num_workers > 0))
 
             best_val_loss = np.inf
-            count = 0
+            patience_counter = 0
             for epoch in range(num_epochs):
-                if epoch == 0:
-                    for param_group in optimizer.param_groups:
-                        param_group['lr'] = lr0
-                else:
+                # Change learning rate from lr0 to lr after first epoch
+                if epoch == 1:
                     for param_group in optimizer.param_groups:
                         param_group['lr'] = lr
 
@@ -323,12 +323,15 @@ if __name__ == '__main__':
                 train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(model, device, train_loader, criterion, optimizer, scaler, use_amp)
                 val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap, _, _ = val_epoch(model, device, val_loader, val_criterion, use_amp)
 
-                wandb.log({'Loss/Train': train_loss}, step=epoch)
-                wandb.log({'AUC/Train': train_auc}, step=epoch)
-                wandb.log({'AP/Train': train_ap}, step=epoch)
-                wandb.log({'Loss/Validation': val_loss}, step=epoch)
-                wandb.log({'AUC/Validation': val_auc}, step=epoch)
-                wandb.log({'AP/Validation': val_ap}, step=epoch)
+                # Log all metrics in a single call for efficiency
+                wandb.log({
+                    'Loss/Train': train_loss,
+                    'AUC/Train': train_auc,
+                    'AP/Train': train_ap,
+                    'Loss/Validation': val_loss,
+                    'AUC/Validation': val_auc,
+                    'AP/Validation': val_ap
+                }, step=epoch)
 
                 print('Train Loss: {:.3f}, Train AUC: {:.3f}, Train AP: {:.3f}, Train Acc: {:.3f}, Train Prec: {:.3f}, Train Rec: {:.3f}, Train Spec: {:.3f}, Train F1: {:.3f}'.format(train_loss, train_auc, train_ap, train_acc, train_prec, train_rec, train_spec, train_f1))
                 print('Val Loss: {:.3f}, Val AUC: {:.3f}, Val AP: {:.3f}, Val Acc: {:.3f}, Val Prec: {:.3f}, Val Rec: {:.3f}, Val Spec: {:.3f}, Val F1: {:.3f}'.format(val_loss, val_auc, val_ap, val_acc, val_prec, val_rec, val_spec, val_f1))
@@ -341,17 +344,17 @@ if __name__ == '__main__':
                     wandb.run.summary['best_val_auc'] = val_auc
                     wandb.run.summary['best_val_ap'] = val_ap
                     wandb.run.summary['best_epoch'] = epoch
-                    count = 0
+                    patience_counter = 0
                 else:
-                    count +=1
+                    patience_counter += 1
                 
-                if count == 10:
+                if patience_counter == 10:
                     print("Early stopping triggered (no improvement for 10 epochs)")
                     break
             
             wandb.finish()
             
-            # Memory cleanup - free GPU memory
+            # Free memory
             del model
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -361,13 +364,13 @@ if __name__ == '__main__':
             print(f'Error type: {type(e).__name__}')
             print(f'Error message: {str(e)}')
             
-            # Try to clean up and finish wandb
+            # Finish wandb
             try:
                 wandb.finish()
             except:
                 pass
             
-            # Try to free memory
+            # Free memory
             try:
                 if 'model' in locals():
                     del model
@@ -377,6 +380,4 @@ if __name__ == '__main__':
                 pass
             
             continue
-    
-    print("\nTransfer learning complete!")
 
