@@ -285,11 +285,15 @@ def fine_tune_all(model, verbose=True):
 if __name__ == '__main__':
 
     # ===== CONFIGURATION =====
-    # Choose transfer learning approach:
-    # 1: Freeze all except FC layer (only final classifier trainable)
-    # 2: Freeze until layer4 (layer4, conv2, bn2, fc trainable)
-    # 3: Fine-tune all layers (all parameters trainable)
-    transfer_learning_approach = 3
+    # Choose which transfer learning approaches to run:
+    # Options:
+    #   [1, 2, 3] - Run all 3 approaches in a single run
+    #   [1]       - Run only approach 1 (Freeze all except FC layer)
+    #   [2]       - Run only approach 2 (Freeze until layer4)
+    #   [3]       - Run only approach 3 (Fine-tune all layers)
+    #   [1, 3]    - Run approaches 1 and 3 only
+    # etc.
+    approaches_to_run = [1, 2, 3]  # Run all 3 approaches by default
     # =========================
     
     # Path to preprocessed CAD data
@@ -303,13 +307,20 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
     
+    # Validate approaches
+    approaches_to_run = [a for a in approaches_to_run if a in [1, 2, 3]]
+    if not approaches_to_run:
+        raise ValueError("No valid approaches selected. Please choose from [1, 2, 3]")
+    
     print(f"\n{'='*80}")
-    if transfer_learning_approach == 1:
-        print(f"Selected: Transfer learning approach 1 - Freeze all except FC layer")
-    elif transfer_learning_approach == 2:
-        print(f"Selected: Transfer learning approach 2 - Freeze until layer4 (keep layer4, conv2, bn2, fc trainable)")
-    elif transfer_learning_approach == 3:
-        print(f"Selected: Transfer learning approach 3 - Fine-tune all layers")
+    print(f"Will run {len(approaches_to_run)} transfer learning approach(es):")
+    for approach in approaches_to_run:
+        if approach == 1:
+            print(f"  - Approach 1: Freeze all except FC layer")
+        elif approach == 2:
+            print(f"  - Approach 2: Freeze until layer4 (keep layer4, conv2, bn2, fc trainable)")
+        elif approach == 3:
+            print(f"  - Approach 3: Fine-tune all layers")
     print(f"{'='*80}\n")    
     
     # Load CAD data
@@ -337,152 +348,168 @@ if __name__ == '__main__':
     
     start_iteration = 1  # Set to 1 to start from beginning, or higher to resume
 
-    
-    for count_search in range(1, n_random_search + 1):
-        # Skip iterations before start_iteration
-        if count_search < start_iteration:
-            continue
+    # Loop over all selected transfer learning approaches
+    for transfer_learning_approach in approaches_to_run:
         
-        # Set random seeds for reproducibility of this specific run
-        torch.manual_seed(count_search)
-        np.random.seed(count_search * 42)
+        print(f"\n{'#'*80}")
+        print(f"# STARTING TRANSFER LEARNING APPROACH {transfer_learning_approach}")
+        if transfer_learning_approach == 1:
+            print(f"# Approach 1: Freeze all except FC layer")
+        elif transfer_learning_approach == 2:
+            print(f"# Approach 2: Freeze until layer4 (keep layer4, conv2, bn2, fc trainable)")
+        elif transfer_learning_approach == 3:
+            print(f"# Approach 3: Fine-tune all layers")
+        print(f"{'#'*80}\n")
         
-        # Sample hyperparameters from continuous distributions and discrete uniform sampling for batch size
-        lr0 = np.exp(np.random.uniform(np.log(lr0_min), np.log(lr0_max)))
-        lr = np.exp(np.random.uniform(np.log(lr_min), np.log(lr_max)))
-        wd = np.exp(np.random.uniform(np.log(wd_min), np.log(wd_max)))
-        bs = int(np.random.choice(bs_choices))
-
-        print(f'\n{"="*80}')
-        print(f'Random search iteration: {count_search}/{n_random_search}')
-        print(f'Sampled hyperparameters:')
-        print(f'  lr0 (initial): {lr0:.6e}')
-        print(f'  lr (main):     {lr:.6e}')
-        print(f'  batch size:    {bs}')
-        print(f'  weight decay:  {wd:.6e}')
-        print(f'{"="*80}')
-        
-        try:
-            # Reload the pretrained model for each iteration (to reset weights)
-            model = torch.load(pretrained_model_path, map_location=device, weights_only=False)
+        for count_search in range(1, n_random_search + 1):
+            # Skip iterations before start_iteration
+            if count_search < start_iteration:
+                continue
             
-            # Apply freezing strategy based on chosen approach
-            if transfer_learning_approach == 1:
-                freeze_all_except_fc(model, verbose=(count_search == start_iteration))
-            elif transfer_learning_approach == 2:
-                freeze_until_layer4(model, verbose=(count_search == start_iteration))
-            elif transfer_learning_approach == 3:
-                fine_tune_all(model, verbose=(count_search == start_iteration))
-
-            # Get model name from the loaded model class
-            model_name = model.__class__.__name__
+            # Set random seeds for reproducibility of this specific run
+            torch.manual_seed(count_search)
+            np.random.seed(count_search * 42)
             
-            current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
-            wandb.init(project='ecgsmartnet-cad-transfer-learning', 
-                       config={'model': model_name, 
-                               'outcome': 'CAD', 
-                               'optimizer': 'AdamW',
-                               'num_epochs': num_epochs,
-                               'lr epoch0': lr0,
-                               'lr': lr,
-                               'bs': bs,
-                               'weight decay': wd,
-                               'pretrained_model': pretrained_model_path,
-                               'transfer_learning': True,
-                               'transfer_learning_approach': transfer_learning_approach,
-                               'frozen_layers': 'all except fc' if transfer_learning_approach == 1 else ('all until layer4' if transfer_learning_approach == 2 else 'none (full fine-tuning)'),
-                               'time': current_time
-                        }
-            )
+            # Sample hyperparameters from continuous distributions and discrete uniform sampling for batch size
+            lr0 = np.exp(np.random.uniform(np.log(lr0_min), np.log(lr0_max)))
+            lr = np.exp(np.random.uniform(np.log(lr_min), np.log(lr_max)))
+            wd = np.exp(np.random.uniform(np.log(wd_min), np.log(wd_max)))
+            bs = int(np.random.choice(bs_choices))
 
-            # Optimize trainable parameters only
-            # Initialize with lr0 for first epoch, will be changed to lr after epoch 0
-            optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), 
-                                         lr=lr0, weight_decay=wd)
-            criterion = torch.nn.CrossEntropyLoss()
-            val_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device))
+            print(f'\n{"="*80}')
+            print(f'Approach {transfer_learning_approach} | Random search iteration: {count_search}/{n_random_search}')
+            print(f'Sampled hyperparameters:')
+            print(f'  lr0 (initial): {lr0:.6e}')
+            print(f'  lr (main):     {lr:.6e}')
+            print(f'  batch size:    {bs}')
+            print(f'  weight decay:  {wd:.6e}')
+            print(f'{"="*80}')
             
-
-            use_amp = device.type == 'cuda'
-            scaler = torch.amp.GradScaler(enabled=use_amp)
-
-            # Set num_workers based on platform (Windows can have issues with multiprocessing)
-            num_workers = 0 if os.name == 'nt' else 4
-            train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True, 
-                                      num_workers=num_workers, pin_memory=True, 
-                                      persistent_workers=(num_workers > 0))
-            val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False,
-                                    num_workers=num_workers, pin_memory=True, 
-                                    persistent_workers=(num_workers > 0))
-
-            best_val_loss = np.inf
-            patience_counter = 0
-            for epoch in range(num_epochs):
-                # Change learning rate from lr0 to lr after first epoch
-                if epoch == 1:
-                    for param_group in optimizer.param_groups:
-                        param_group['lr'] = lr
-
-
-                print(f'Epoch {epoch+1}/{num_epochs}')
-                train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(model, device, train_loader, criterion, optimizer, scaler, use_amp)
-                val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap, _, _ = val_epoch(model, device, val_loader, val_criterion, use_amp)
-
-                # Log all metrics in a single call for efficiency
-                wandb.log({
-                    'Loss/Train': train_loss,
-                    'AUC/Train': train_auc,
-                    'AP/Train': train_ap,
-                    'Loss/Validation': val_loss,
-                    'AUC/Validation': val_auc,
-                    'AP/Validation': val_ap
-                }, step=epoch)
-
-                print('Train Loss: {:.3f}, Train AUC: {:.3f}, Train AP: {:.3f}, Train Acc: {:.3f}, Train Prec: {:.3f}, Train Rec: {:.3f}, Train Spec: {:.3f}, Train F1: {:.3f}'.format(train_loss, train_auc, train_ap, train_acc, train_prec, train_rec, train_spec, train_f1))
-                print('Val Loss: {:.3f}, Val AUC: {:.3f}, Val AP: {:.3f}, Val Acc: {:.3f}, Val Prec: {:.3f}, Val Rec: {:.3f}, Val Spec: {:.3f}, Val F1: {:.3f}'.format(val_loss, val_auc, val_ap, val_acc, val_prec, val_rec, val_spec, val_f1))
-
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    model_filename = f'models/transfer_learning_CAD__{current_time}.pt'
-                    torch.save(model, model_filename)
-                    wandb.run.summary['best_val_loss'] = val_loss
-                    wandb.run.summary['best_val_auc'] = val_auc
-                    wandb.run.summary['best_val_ap'] = val_ap
-                    wandb.run.summary['best_epoch'] = epoch
-                    patience_counter = 0
-                else:
-                    patience_counter += 1
-                
-                if patience_counter == 10:
-                    print("Early stopping")
-                    break
-            
-            wandb.finish()
-            
-            # Free memory
-            del model
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                
-        except Exception as e:
-            print(f'\nError in iteration {count_search}')
-            print(f'Error type: {type(e).__name__}')
-            print(f'Error message: {str(e)}')
-            
-            # Finish wandb
             try:
+                # Reload the pretrained model for each iteration (to reset weights)
+                model = torch.load(pretrained_model_path, map_location=device, weights_only=False)
+                
+                # Apply freezing strategy based on chosen approach
+                if transfer_learning_approach == 1:
+                    freeze_all_except_fc(model, verbose=(count_search == start_iteration))
+                elif transfer_learning_approach == 2:
+                    freeze_until_layer4(model, verbose=(count_search == start_iteration))
+                elif transfer_learning_approach == 3:
+                    fine_tune_all(model, verbose=(count_search == start_iteration))
+
+                # Get model name from the loaded model class
+                model_name = model.__class__.__name__
+                
+                current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
+                wandb.init(project='ecgsmartnet-cad-transfer-learning', 
+                           config={'model': model_name, 
+                                   'outcome': 'CAD', 
+                                   'optimizer': 'AdamW',
+                                   'num_epochs': num_epochs,
+                                   'lr epoch0': lr0,
+                                   'lr': lr,
+                                   'bs': bs,
+                                   'weight decay': wd,
+                                   'pretrained_model': pretrained_model_path,
+                                   'transfer_learning': True,
+                                   'transfer_learning_approach': transfer_learning_approach,
+                                   'frozen_layers': 'all except fc' if transfer_learning_approach == 1 else ('all until layer4' if transfer_learning_approach == 2 else 'none (full fine-tuning)'),
+                                   'time': current_time
+                            }
+                )
+
+                # Optimize trainable parameters only
+                # Initialize with lr0 for first epoch, will be changed to lr after epoch 0
+                optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), 
+                                             lr=lr0, weight_decay=wd)
+                criterion = torch.nn.CrossEntropyLoss()
+                val_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1, pos_weight], dtype=torch.float32).to(device))
+                
+
+                use_amp = device.type == 'cuda'
+                scaler = torch.amp.GradScaler(enabled=use_amp)
+
+                # Set num_workers based on platform (Windows can have issues with multiprocessing)
+                num_workers = 0 if os.name == 'nt' else 4
+                train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True, 
+                                          num_workers=num_workers, pin_memory=True, 
+                                          persistent_workers=(num_workers > 0))
+                val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False,
+                                        num_workers=num_workers, pin_memory=True, 
+                                        persistent_workers=(num_workers > 0))
+
+                best_val_loss = np.inf
+                patience_counter = 0
+                for epoch in range(num_epochs):
+                    # Change learning rate from lr0 to lr after first epoch
+                    if epoch == 1:
+                        for param_group in optimizer.param_groups:
+                            param_group['lr'] = lr
+
+
+                    print(f'Epoch {epoch+1}/{num_epochs}')
+                    train_loss, train_auc, train_acc, train_prec, train_rec, train_spec, train_f1, train_ap = train_epoch(model, device, train_loader, criterion, optimizer, scaler, use_amp)
+                    val_loss, val_auc, val_acc, val_prec, val_rec, val_spec, val_f1, val_ap, _, _ = val_epoch(model, device, val_loader, val_criterion, use_amp)
+
+                    # Log all metrics in a single call for efficiency
+                    wandb.log({
+                        'Loss/Train': train_loss,
+                        'AUC/Train': train_auc,
+                        'AP/Train': train_ap,
+                        'Loss/Validation': val_loss,
+                        'AUC/Validation': val_auc,
+                        'AP/Validation': val_ap
+                    }, step=epoch)
+
+                    print('Train Loss: {:.3f}, Train AUC: {:.3f}, Train AP: {:.3f}, Train Acc: {:.3f}, Train Prec: {:.3f}, Train Rec: {:.3f}, Train Spec: {:.3f}, Train F1: {:.3f}'.format(train_loss, train_auc, train_ap, train_acc, train_prec, train_rec, train_spec, train_f1))
+                    print('Val Loss: {:.3f}, Val AUC: {:.3f}, Val AP: {:.3f}, Val Acc: {:.3f}, Val Prec: {:.3f}, Val Rec: {:.3f}, Val Spec: {:.3f}, Val F1: {:.3f}'.format(val_loss, val_auc, val_ap, val_acc, val_prec, val_rec, val_spec, val_f1))
+
+                    if val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        model_filename = f'models/transfer_learning_CAD__{current_time}.pt'
+                        torch.save(model, model_filename)
+                        wandb.run.summary['best_val_loss'] = val_loss
+                        wandb.run.summary['best_val_auc'] = val_auc
+                        wandb.run.summary['best_val_ap'] = val_ap
+                        wandb.run.summary['best_epoch'] = epoch
+                        patience_counter = 0
+                    else:
+                        patience_counter += 1
+                    
+                    if patience_counter == 10:
+                        print("Early stopping")
+                        break
+                
                 wandb.finish()
-            except:
-                pass
-            
-            # Free memory
-            try:
-                if 'model' in locals():
-                    del model
+                
+                # Free memory
+                del model
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-            except:
-                pass
-            
-            continue
+                    
+            except Exception as e:
+                print(f'\nError in iteration {count_search}')
+                print(f'Error type: {type(e).__name__}')
+                print(f'Error message: {str(e)}')
+                
+                # Finish wandb
+                try:
+                    wandb.finish()
+                except:
+                    pass
+                
+                # Free memory
+                try:
+                    if 'model' in locals():
+                        del model
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except:
+                    pass
+                
+                continue
 
+    print(f"\n{'#'*80}")
+    print(f"# ALL TRANSFER LEARNING APPROACHES COMPLETED")
+    print(f"# Total approaches run: {len(approaches_to_run)}")
+    print(f"{'#'*80}\n")
