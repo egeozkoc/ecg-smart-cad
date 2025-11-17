@@ -172,7 +172,7 @@ def get_data(path):
 
 def freeze_all_except_fc(model, verbose=True):
     """
-    Freeze all layers in the model except the final fully connected layer (fc).
+    Approach 1: Freeze all layers in the model except the final fully connected layer (fc).
     """
     # First, freeze all parameters
     for param in model.parameters():
@@ -186,6 +186,89 @@ def freeze_all_except_fc(model, verbose=True):
         # Print trainable parameters summary
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         total_params = sum(p.numel() for p in model.parameters())
+        print(f"\n{'='*80}")
+        print(f"Approach 1: Freeze all except FC layer")
+        print(f"{'='*80}")
+        print(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100*trainable_params/total_params:.2f}%)")
+        
+        # Print detailed layer-by-layer status
+        print("\n" + "="*80)
+        print("Model layers and their freeze status:")
+        print("="*80)
+        for name, param in model.named_parameters():
+            status = "Trainable" if param.requires_grad else "Frozen"
+            num_params = param.numel()
+            print(f"{status:12} | {num_params:>10,} params | {name}")
+        print("="*80 + "\n")
+
+
+def freeze_until_layer4(model, verbose=True):
+    """
+    Approach 2: Freeze all layers until (but not including) layer4 (final residual block).
+    Keeps trainable: layer4, conv2, bn2, avgpool, fc
+    """
+    # First, freeze all parameters
+    for param in model.parameters():
+        param.requires_grad = False
+    
+    # Unfreeze layer4 (final residual block)
+    if hasattr(model, 'layer4'):
+        for param in model.layer4.parameters():
+            param.requires_grad = True
+    
+    # Unfreeze conv2 and bn2 (cross-lead fusion layers)
+    if hasattr(model, 'conv2'):
+        for param in model.conv2.parameters():
+            param.requires_grad = True
+    if hasattr(model, 'bn2'):
+        for param in model.bn2.parameters():
+            param.requires_grad = True
+    
+    # Unfreeze post_lead_attn if exists (for attention models)
+    if hasattr(model, 'post_lead_attn') and model.post_lead_attn is not None:
+        for param in model.post_lead_attn.parameters():
+            param.requires_grad = True
+    
+    # Unfreeze fc layer
+    if hasattr(model, 'fc'):
+        for param in model.fc.parameters():
+            param.requires_grad = True
+    
+    if verbose:
+        # Print trainable parameters summary
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in model.parameters())
+        print(f"\n{'='*80}")
+        print(f"Approach 2: Freeze all until layer4 (keep layer4, conv2, bn2, fc trainable)")
+        print(f"{'='*80}")
+        print(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100*trainable_params/total_params:.2f}%)")
+        
+        # Print detailed layer-by-layer status
+        print("\n" + "="*80)
+        print("Model layers and their freeze status:")
+        print("="*80)
+        for name, param in model.named_parameters():
+            status = "Trainable" if param.requires_grad else "Frozen"
+            num_params = param.numel()
+            print(f"{status:12} | {num_params:>10,} params | {name}")
+        print("="*80 + "\n")
+
+
+def fine_tune_all(model, verbose=True):
+    """
+    Approach 3: Keep all layers trainable (full fine-tuning).
+    """
+    # All parameters are trainable by default, but explicitly set them
+    for param in model.parameters():
+        param.requires_grad = True
+    
+    if verbose:
+        # Print trainable parameters summary
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in model.parameters())
+        print(f"\n{'='*80}")
+        print(f"Approach 3: Fine-tune all layers (all parameters trainable)")
+        print(f"{'='*80}")
         print(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100*trainable_params/total_params:.2f}%)")
         
         # Print detailed layer-by-layer status
@@ -201,6 +284,14 @@ def freeze_all_except_fc(model, verbose=True):
 
 if __name__ == '__main__':
 
+    # ===== CONFIGURATION =====
+    # Choose transfer learning approach:
+    # 1: Freeze all except FC layer (only final classifier trainable)
+    # 2: Freeze until layer4 (layer4, conv2, bn2, fc trainable)
+    # 3: Fine-tune all layers (all parameters trainable)
+    transfer_learning_approach = 3
+    # =========================
+    
     # Path to preprocessed CAD data
     path = 'cad_dataset_preprocessed/'
     
@@ -211,6 +302,15 @@ if __name__ == '__main__':
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
+    
+    print(f"\n{'='*80}")
+    if transfer_learning_approach == 1:
+        print(f"Selected: Transfer learning approach 1 - Freeze all except FC layer")
+    elif transfer_learning_approach == 2:
+        print(f"Selected: Transfer learning approach 2 - Freeze until layer4 (keep layer4, conv2, bn2, fc trainable)")
+    elif transfer_learning_approach == 3:
+        print(f"Selected: Transfer learning approach 3 - Fine-tune all layers")
+    print(f"{'='*80}\n")    
     
     # Load CAD data
     x_train, y_train, x_val, y_val = get_data(path)
@@ -247,11 +347,10 @@ if __name__ == '__main__':
         torch.manual_seed(count_search)
         np.random.seed(count_search * 42)
         
-        # Sample hyperparameters from continuous distributions
+        # Sample hyperparameters from continuous distributions and discrete uniform sampling for batch size
         lr0 = np.exp(np.random.uniform(np.log(lr0_min), np.log(lr0_max)))
         lr = np.exp(np.random.uniform(np.log(lr_min), np.log(lr_max)))
         wd = np.exp(np.random.uniform(np.log(wd_min), np.log(wd_max)))
-        # Discrete uniform sampling for batch size
         bs = int(np.random.choice(bs_choices))
 
         print(f'\n{"="*80}')
@@ -264,11 +363,16 @@ if __name__ == '__main__':
         print(f'{"="*80}')
         
         try:
-
             # Reload the pretrained model for each iteration (to reset weights)
             model = torch.load(pretrained_model_path, map_location=device, weights_only=False)
-            # Print layer status only on first iteration
-            freeze_all_except_fc(model, verbose=(count_search == start_iteration))
+            
+            # Apply freezing strategy based on chosen approach
+            if transfer_learning_approach == 1:
+                freeze_all_except_fc(model, verbose=(count_search == start_iteration))
+            elif transfer_learning_approach == 2:
+                freeze_until_layer4(model, verbose=(count_search == start_iteration))
+            elif transfer_learning_approach == 3:
+                fine_tune_all(model, verbose=(count_search == start_iteration))
 
             # Get model name from the loaded model class
             model_name = model.__class__.__name__
@@ -285,12 +389,13 @@ if __name__ == '__main__':
                                'weight decay': wd,
                                'pretrained_model': pretrained_model_path,
                                'transfer_learning': True,
-                               'frozen_layers': 'all except fc',
+                               'transfer_learning_approach': transfer_learning_approach,
+                               'frozen_layers': 'all except fc' if transfer_learning_approach == 1 else ('all until layer4' if transfer_learning_approach == 2 else 'none (full fine-tuning)'),
                                'time': current_time
                         }
             )
 
-            # Only optimize the unfrozen parameters (fc layer)
+            # Optimize trainable parameters only
             # Initialize with lr0 for first epoch, will be changed to lr after epoch 0
             optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), 
                                          lr=lr0, weight_decay=wd)
@@ -349,7 +454,7 @@ if __name__ == '__main__':
                     patience_counter += 1
                 
                 if patience_counter == 10:
-                    print("Early stopping triggered (no improvement for 10 epochs)")
+                    print("Early stopping")
                     break
             
             wandb.finish()
