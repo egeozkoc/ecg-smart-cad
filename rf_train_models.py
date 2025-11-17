@@ -32,8 +32,10 @@ def get_data(num_features=None):
     # Use a single features file for all runs
     features = pd.read_csv('results/features.csv')
     if num_features is None:
-        feature_names = pd.read_csv('rf_feature_importance_cross_validation.csv')['feature'].tolist()
+        # For all-features model: use original feature list
+        feature_names = pd.read_csv('features.txt', header=None)[0].tolist()
     else:
+        # For selected-features models: use importance-ranked features
         feature_names = pd.read_csv('rf_feature_importance_cross_validation.csv')['feature'].tolist()[:num_features]
 
     train_df = pd.read_csv('train_set.csv')
@@ -88,8 +90,8 @@ def train_model_all_features():
 
     # Define parameter grid
     param_grid = {
-        'n_estimators': [50, 75, 100, 250, 500],
-        'class_weight': ['balanced_subsample', 'balanced'],
+        'n_estimators': [50, 75, 100, 250],
+        'class_weight': ['balanced_subsample'],
         'criterion': ['entropy', 'gini'],
         'max_features': ['sqrt', 'log2', None],
         'min_samples_split': [0.001, 0.005, 0.01],
@@ -230,5 +232,5 @@ if __name__ == '__main__':
     # important_features, importance_scores = get_feature_importance()
     # pd.DataFrame({'feature': important_features, 'importance': importance_scores}).to_csv(f'rf_feature_importance_cross_validation.csv', index=False)
     
-    for num_features in [25, 50, 75, 100, 150]:
+    for num_features in [125]:
         train_models_selected_features(num_features)
