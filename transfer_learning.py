@@ -205,7 +205,7 @@ if __name__ == '__main__':
     path = 'cad_dataset_preprocessed/'
     
     # Path to pretrained model
-    pretrained_model_path = 'models/ecgsmartnet_acs_2025-09-23-12-03-20.pt'
+    pretrained_model_path = 'models/ecgsmartnet_attention_se_acs_2025-09-23-12-03-20.pt'
 
     os.makedirs('models', exist_ok=True)
 
