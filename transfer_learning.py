@@ -1,3 +1,20 @@
+"""
+Transfer Learning Script for ECG-SMART-NET and ECG-SMART-NET-SE Models
+
+This script applies transfer learning to pretrained ECG models for CAD detection.
+Supports both:
+  - ECGSMARTNET: Base model without attention mechanisms
+  - ECGSMARTNET_Attention: Model with attention mechanisms (SE or CBAM)
+
+Three transfer learning approaches are available:
+  1. Freeze all layers except the final FC layer
+  2. Freeze all layers until layer4 (keep layer4, conv2, bn2, fc trainable)
+  3. Fine-tune all layers (full model training)
+
+The script automatically detects whether the loaded model uses SE attention
+and logs this information in Weights & Biases (wandb).
+"""
+
 import os
 from ecg_models import *
 import numpy as np
@@ -293,14 +310,14 @@ if __name__ == '__main__':
     #   [3]       - Run only approach 3 (Fine-tune all layers)
     #   [1, 3]    - Run approaches 1 and 3 only
     # etc.
-    approaches_to_run = [1, 2, 3]  # Run all 3 approaches by default
+    approaches_to_run = [2, 3]  # Run all 3 approaches by default
     # =========================
     
     # Path to preprocessed CAD data
     path = 'cad_dataset_preprocessed/'
     
     # Path to pretrained model
-    pretrained_model_path = 'models/ecgsmartnet_acs_2025-09-23-12-03-20.pt'
+    pretrained_model_path = 'models/ecgsmartnet_attention_se_acs_2025-09-23-12-03-20.pt'
 
     os.makedirs('models', exist_ok=True)
 
@@ -389,6 +406,32 @@ if __name__ == '__main__':
                 # Reload the pretrained model for each iteration (to reset weights)
                 model = torch.load(pretrained_model_path, map_location=device, weights_only=False)
                 
+                # Detect attention type (SE, CBAM, or None)
+                model_name = model.__class__.__name__
+                attention_type = None
+                
+                if model_name == 'ECGSMARTNET_Attention':
+                    # Check if it has attention modules
+                    if hasattr(model, 'post_lead_attn') and model.post_lead_attn is not None:
+                        # Check if it's SE or CBAM by inspecting the module type
+                        if hasattr(model.post_lead_attn, 'fc'):  # SE has fc, CBAM has ca/sa
+                            attention_type = 'se'
+                        elif hasattr(model.post_lead_attn, 'ca'):
+                            attention_type = 'cbam'
+                    # If post_lead_attn is None, check layer2-4 for attention
+                    elif hasattr(model, 'layer2') and len(model.layer2) > 0:
+                        first_block = model.layer2[0]
+                        if hasattr(first_block, 'attn') and first_block.attn is not None:
+                            if hasattr(first_block.attn, 'fc'):
+                                attention_type = 'se'
+                            elif hasattr(first_block.attn, 'ca'):
+                                attention_type = 'cbam'
+                
+                if count_search == start_iteration:
+                    print(f"\nModel Architecture:")
+                    print(f"  - Model class: {model_name}")
+                    print(f"  - Attention type: {attention_type if attention_type else 'None'}")
+                
                 # Apply freezing strategy based on chosen approach
                 if transfer_learning_approach == 1:
                     freeze_all_except_fc(model, verbose=(count_search == start_iteration))
@@ -396,9 +439,6 @@ if __name__ == '__main__':
                     freeze_until_layer4(model, verbose=(count_search == start_iteration))
                 elif transfer_learning_approach == 3:
                     fine_tune_all(model, verbose=(count_search == start_iteration))
-
-                # Get model name from the loaded model class
-                model_name = model.__class__.__name__
                 
                 current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
                 wandb.init(project='ecgsmartnet-cad-transfer-learning', 
@@ -414,6 +454,7 @@ if __name__ == '__main__':
                                    'transfer_learning': True,
                                    'transfer_learning_approach': transfer_learning_approach,
                                    'frozen_layers': 'all except fc' if transfer_learning_approach == 1 else ('all until layer4' if transfer_learning_approach == 2 else 'none (full fine-tuning)'),
+                                   'attention_type': attention_type if attention_type else 'none',
                                    'time': current_time
                             }
                 )
