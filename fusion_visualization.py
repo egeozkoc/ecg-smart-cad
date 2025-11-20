@@ -217,9 +217,6 @@ def plot_probability_scatter(rf_probs, dl_probs, y_true, title, save_path,
                c='#e74c3c', alpha=1.0, s=50, label=f'CAD (n={np.sum(cad_mask)})',
                edgecolors='white', linewidth=0.5)
     
-    # Add diagonal reference line (equal predictions)
-    ax.plot([0, 1], [0, 1], 'k--', alpha=0.3, linewidth=1, label='RF = DL')
-    
     # Add optimal threshold lines
     if rf_threshold is not None:
         ax.axvline(x=rf_threshold, color='#9b59b6', linestyle=':', linewidth=2.5, 
