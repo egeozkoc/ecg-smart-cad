@@ -347,8 +347,8 @@ def main():
     # ============ Configuration ============
     # Set num_features to match your RF model:
     # - None: uses all features (for models trained on all features)
-    # - Integer (e.g., 150): uses top N features (for models trained on selected features)
-    num_features = 150  # Change this to match your RF model
+    # - Integer (e.g., 100): uses top N features (for models trained on selected features)
+    num_features = 100  # Using the best performing RF model with 100 features
     
     # ============ Define Model Paths ============
     if num_features is None:
@@ -356,7 +356,7 @@ def main():
     else:
         rf_model_path = f'rf_models/best_rf_selected_features_{num_features}.pkl'
     
-    dl_model_path = 'models/ecgsmartnet_CAD__2025-11-03-11-11-52.pt'
+    dl_model_path = 'models/transfer_learning_CAD__2025-11-17-16-51-30.pt'
     
     print(f'\nConfiguration:')
     print(f'  RF Model: {rf_model_path}')
