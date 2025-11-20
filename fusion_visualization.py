@@ -161,7 +161,37 @@ def get_dl_predictions(model, device, dataloader):
     return y_prob_pos
 
 
-def plot_probability_scatter(rf_probs, dl_probs, y_true, title, save_path, fusion_weight_rf=None):
+def find_optimal_f1_threshold(y_true, y_probs):
+    """Find the threshold that maximizes F1 score.
+    
+    Args:
+        y_true: true labels
+        y_probs: predicted probabilities
+        
+    Returns:
+        optimal_threshold: threshold that maximizes F1
+        max_f1: maximum F1 score
+    """
+    from sklearn.metrics import f1_score, roc_curve
+    
+    fpr, tpr, thresholds = roc_curve(y_true, y_probs)
+    
+    f1_scores = []
+    for thresh in thresholds:
+        preds = (y_probs >= thresh).astype(int)
+        f1 = f1_score(y_true, preds, zero_division=0)
+        f1_scores.append(f1)
+    
+    f1_scores = np.array(f1_scores)
+    optimal_idx = np.argmax(f1_scores)
+    optimal_threshold = thresholds[optimal_idx]
+    max_f1 = f1_scores[optimal_idx]
+    
+    return optimal_threshold, max_f1
+
+
+def plot_probability_scatter(rf_probs, dl_probs, y_true, title, save_path, 
+                             rf_threshold=None, dl_threshold=None):
     """Create scatter plot of RF vs DL probabilities.
     
     Args:
@@ -170,7 +200,8 @@ def plot_probability_scatter(rf_probs, dl_probs, y_true, title, save_path, fusio
         y_true: true labels
         title: plot title
         save_path: path to save the plot
-        fusion_weight_rf: if provided, plot fusion decision line
+        rf_threshold: optimal F1 threshold for RF model (vertical line)
+        dl_threshold: optimal F1 threshold for DL model (horizontal line)
     """
     fig, ax = plt.subplots(figsize=(10, 10))
     
@@ -178,47 +209,25 @@ def plot_probability_scatter(rf_probs, dl_probs, y_true, title, save_path, fusio
     no_cad_mask = (y_true == 0)
     cad_mask = (y_true == 1)
     
-    # Plot samples by class with different colors
+    # Plot samples by class with different colors (opaque)
     ax.scatter(rf_probs[no_cad_mask], dl_probs[no_cad_mask], 
-               c='#3498db', alpha=0.6, s=50, label=f'No CAD (n={np.sum(no_cad_mask)})',
+               c='#3498db', alpha=1.0, s=50, label=f'No CAD (n={np.sum(no_cad_mask)})',
                edgecolors='white', linewidth=0.5)
     ax.scatter(rf_probs[cad_mask], dl_probs[cad_mask], 
-               c='#e74c3c', alpha=0.6, s=50, label=f'CAD (n={np.sum(cad_mask)})',
+               c='#e74c3c', alpha=1.0, s=50, label=f'CAD (n={np.sum(cad_mask)})',
                edgecolors='white', linewidth=0.5)
     
     # Add diagonal reference line (equal predictions)
     ax.plot([0, 1], [0, 1], 'k--', alpha=0.3, linewidth=1, label='RF = DL')
     
-    # If fusion weight provided, plot fusion decision lines
-    if fusion_weight_rf is not None:
-        weight_dl = 1 - fusion_weight_rf
-        
-        # Fusion threshold lines at different values
-        thresholds = [0.3, 0.5, 0.7]
-        colors = ['#95a5a6', '#7f8c8d', '#34495e']
-        
-        for thresh, color in zip(thresholds, colors):
-            # fusion_prob = rf_weight * rf_prob + dl_weight * dl_prob = thresh
-            # dl_prob = (thresh - rf_weight * rf_prob) / dl_weight
-            rf_vals = np.linspace(0, 1, 100)
-            dl_vals = (thresh - fusion_weight_rf * rf_vals) / weight_dl
-            
-            # Only plot within valid range
-            valid_mask = (dl_vals >= 0) & (dl_vals <= 1)
-            if np.any(valid_mask):
-                ax.plot(rf_vals[valid_mask], dl_vals[valid_mask], 
-                       color=color, linestyle=':', linewidth=2,
-                       label=f'Fusion = {thresh:.1f} (w_RF={fusion_weight_rf:.2f})')
+    # Add optimal threshold lines
+    if rf_threshold is not None:
+        ax.axvline(x=rf_threshold, color='#9b59b6', linestyle=':', linewidth=2.5, 
+                   label=f'RF F1 Threshold = {rf_threshold:.3f}', alpha=0.8)
     
-    # Calculate AUC for each model
-    rf_auc = roc_auc_score(y_true, rf_probs)
-    dl_auc = roc_auc_score(y_true, dl_probs)
-    
-    # Add text box with AUC scores
-    textstr = f'RF AUC: {rf_auc:.3f}\nDL AUC: {dl_auc:.3f}'
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
-    ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=11,
-            verticalalignment='top', bbox=props)
+    if dl_threshold is not None:
+        ax.axhline(y=dl_threshold, color='#e67e22', linestyle=':', linewidth=2.5, 
+                   label=f'DL F1 Threshold = {dl_threshold:.3f}', alpha=0.8)
     
     ax.set_xlabel('Random Forest Probability', fontsize=12, fontweight='bold')
     ax.set_ylabel('ECG-Smart-Net Probability', fontsize=12, fontweight='bold')
@@ -380,10 +389,6 @@ def main():
     # ============ Configuration (matching fusion_model.py) ============
     num_features = 100  # Using the best performing RF model with 100 features
     
-    # Optional: Set fusion weight if you want to visualize fusion decision boundaries
-    # Set to None to skip fusion lines, or set to a value (e.g., 0.5) to show them
-    fusion_weight_rf = 0.5  # 0.5 = equal weighting, adjust as needed
-    
     # ============ Define Model Paths (matching fusion_model.py) ============
     if num_features is None:
         rf_model_path = 'rf_models/best_rf_all_features.pkl'
@@ -396,8 +401,6 @@ def main():
     print(f'  RF Model: {rf_model_path}')
     print(f'  DL Model: {dl_model_path}')
     print(f'  Number of features: {num_features if num_features else "all"}')
-    if fusion_weight_rf is not None:
-        print(f'  Fusion weight (RF): {fusion_weight_rf:.3f}')
     
     # ============ Load Data ============
     print('\n[1/4] Loading data...')
@@ -457,26 +460,37 @@ def main():
     dl_test_probs = get_dl_predictions(dl_model, device, test_loader)
     print('✓ DL predictions complete')
     
+    # ============ Find Optimal F1 Thresholds from Validation Set ============
+    print('\nFinding optimal F1 thresholds from validation set...')
+    rf_val_f1_threshold, rf_val_f1_score = find_optimal_f1_threshold(y_val, rf_val_probs)
+    dl_val_f1_threshold, dl_val_f1_score = find_optimal_f1_threshold(y_val, dl_val_probs)
+    
+    print(f'  RF optimal F1 threshold: {rf_val_f1_threshold:.3f} (F1={rf_val_f1_score:.3f})')
+    print(f'  DL optimal F1 threshold: {dl_val_f1_threshold:.3f} (F1={dl_val_f1_score:.3f})')
+    print('✓ Thresholds computed')
+    
     # ============ Create Visualizations ============
     print('\n[4/4] Creating visualizations...')
     os.makedirs('visualizations', exist_ok=True)
     
-    # Validation set scatter plot
+    # Validation set scatter plot (with validation-derived thresholds)
     print('\nGenerating validation set scatter plot...')
     plot_probability_scatter(
         rf_val_probs, dl_val_probs, y_val,
         'Validation Set: RF vs DL Model Predictions',
         'visualizations/val_rf_vs_dl_scatter.png',
-        fusion_weight_rf=fusion_weight_rf
+        rf_threshold=rf_val_f1_threshold,
+        dl_threshold=dl_val_f1_threshold
     )
     
-    # Test set scatter plot
+    # Test set scatter plot (using same thresholds from validation)
     print('Generating test set scatter plot...')
     plot_probability_scatter(
         rf_test_probs, dl_test_probs, y_test,
         'Test Set: RF vs DL Model Predictions',
         'visualizations/test_rf_vs_dl_scatter.png',
-        fusion_weight_rf=fusion_weight_rf
+        rf_threshold=rf_val_f1_threshold,
+        dl_threshold=dl_val_f1_threshold
     )
     
     # Validation set hexbin plot (density)
