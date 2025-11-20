@@ -350,6 +350,18 @@ def main():
     # - Integer (e.g., 100): uses top N features (for models trained on selected features)
     num_features = 100  # Using the best performing RF model with 100 features
     
+    # Fusion strategy selection:
+    # - 'optimize': Automatically find optimal weights using validation set (grid search)
+    # - 'fixed': Use manually specified weights
+    fusion_strategy = 'fixed'  # Options: 'optimize' or 'fixed'
+    
+    # If fusion_strategy == 'fixed', specify the weight for RF model (DL weight = 1 - rf_weight)
+    # Examples:
+    #   0.5  -> equal weighting (50% RF, 50% DL)
+    #   0.6  -> more weight on RF (60% RF, 40% DL)
+    #   0.3  -> more weight on DL (30% RF, 70% DL)
+    fixed_rf_weight = 0.5  # Only used when fusion_strategy == 'fixed'
+    
     # ============ Define Model Paths ============
     if num_features is None:
         rf_model_path = 'rf_models/best_rf_all_features.pkl'
@@ -362,6 +374,10 @@ def main():
     print(f'  RF Model: {rf_model_path}')
     print(f'  DL Model: {dl_model_path}')
     print(f'  Number of features: {num_features if num_features else "all"}')
+    print(f'  Fusion strategy: {fusion_strategy}')
+    if fusion_strategy == 'fixed':
+        print(f'  Fixed RF weight: {fixed_rf_weight:.3f}')
+        print(f'  Fixed DL weight: {1-fixed_rf_weight:.3f}')
     
     # ============ Load Data ============
     print('\n[1/6] Loading data...')
@@ -434,14 +450,33 @@ def main():
     dl_test_probs = get_dl_predictions(dl_model, device, test_loader)
     print('✓ DL predictions complete')
     
-    # ============ Optimize Fusion Weights ============
-    print('\n[4/6] Optimizing fusion weights on validation set...')
-    best_weight_rf, best_val_auc = optimize_fusion_weights(y_val, rf_val_probs, dl_val_probs)
-    weight_dl = 1 - best_weight_rf
+    # ============ Determine Fusion Weights ============
+    print('\n[4/6] Determining fusion weights...')
     
-    print(f'  Optimal weights: RF={best_weight_rf:.3f}, DL={weight_dl:.3f}')
-    print(f'  Best validation AUC: {best_val_auc:.3f}')
-    print('✓ Fusion weights optimized')
+    if fusion_strategy == 'optimize':
+        print('  Strategy: Optimizing weights on validation set...')
+        best_weight_rf, best_val_auc = optimize_fusion_weights(y_val, rf_val_probs, dl_val_probs)
+        weight_dl = 1 - best_weight_rf
+        
+        print(f'  Optimal weights: RF={best_weight_rf:.3f}, DL={weight_dl:.3f}')
+        print(f'  Best validation AUC: {best_val_auc:.3f}')
+        print('✓ Fusion weights optimized')
+    
+    elif fusion_strategy == 'fixed':
+        print('  Strategy: Using fixed weights...')
+        best_weight_rf = fixed_rf_weight
+        weight_dl = 1 - best_weight_rf
+        
+        # Calculate validation AUC with fixed weights
+        fusion_val_probs_fixed = best_weight_rf * rf_val_probs + weight_dl * dl_val_probs
+        best_val_auc = roc_auc_score(y_val, fusion_val_probs_fixed)
+        
+        print(f'  Fixed weights: RF={best_weight_rf:.3f}, DL={weight_dl:.3f}')
+        print(f'  Validation AUC: {best_val_auc:.3f}')
+        print('✓ Fusion weights set')
+    
+    else:
+        raise ValueError(f"Invalid fusion_strategy: {fusion_strategy}. Must be 'optimize' or 'fixed'")
     
     # ============ Create Fused Predictions ============
     print('\n[5/6] Creating fused predictions...')
@@ -486,7 +521,8 @@ def main():
     print('\n' + '=' * 80)
     print('FUSION MODEL RESULTS')
     feature_info = f'{num_features} features' if num_features else 'all features'
-    print(f'Fusion Strategy: Weighted Average (RF={best_weight_rf:.3f}, DL={weight_dl:.3f})')
+    strategy_info = 'Optimized' if fusion_strategy == 'optimize' else 'Fixed'
+    print(f'Fusion Strategy: {strategy_info} Weighted Average (RF={best_weight_rf:.3f}, DL={weight_dl:.3f})')
     print(f'RF Features Used: {feature_info}')
     print('-' * 80)
     print(f"Rule Out Thresh\nSens > 0.90\n{r3(rule_out_thresh) if rule_out_thresh is not None else 'N/A'}")
@@ -522,8 +558,9 @@ def main():
 
     # Save metrics table to CSV in the displayed order, with CI columns (rounded to 3 decimals)
     feature_info = f'{num_features} features' if num_features else 'all features'
+    strategy_info = 'Optimized' if fusion_strategy == 'optimize' else 'Fixed'
     rows = [
-        ['Fusion Strategy', f'Weighted (RF={best_weight_rf:.3f}, DL={weight_dl:.3f})', None, None],
+        ['Fusion Strategy', f'{strategy_info} Weighted (RF={best_weight_rf:.3f}, DL={weight_dl:.3f})', None, None],
         ['RF Features Used', feature_info, None, None],
         ['Rule Out Thresh (Sens > 0.90)', r3(rule_out_thresh), None, None],
         ['Rule In Thresh (PPV > 0.85)', r3(rule_in_thresh), None, None],
