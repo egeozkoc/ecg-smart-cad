@@ -360,7 +360,7 @@ def main():
     #   0.5  -> equal weighting (50% RF, 50% DL)
     #   0.6  -> more weight on RF (60% RF, 40% DL)
     #   0.3  -> more weight on DL (30% RF, 70% DL)
-    fixed_rf_weight = 0.5  # Only used when fusion_strategy == 'fixed'
+    fixed_rf_weight = 0.8  # Only used when fusion_strategy == 'fixed'
     
     # ============ Define Model Paths ============
     if num_features is None:
