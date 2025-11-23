@@ -330,11 +330,76 @@ class Temporal(nn.Module):
         return out
 ########################################################################################
 
+# Temporal ResNet-34 Architecture ######################################################
+class TemporalResNet34(nn.Module):
+    def __init__(self, num_classes=2):
+        super(TemporalResNet34, self).__init__()
+        self.in_channels = 64
+
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=(1,7), stride=(1,2), padding=(0,3), bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=(1,3), stride=(1,2), padding=(0,1))
+
+        # ResNet-34 uses [3, 4, 6, 3] blocks instead of [2, 2, 2, 2]
+        self.layer1 = self.make_layer(64, 3, stride=1)
+        self.layer2 = self.make_layer(128, 4, stride=2)
+        self.layer3 = self.make_layer(256, 6, stride=2)
+        self.layer4 = self.make_layer(512, 3, stride=2)
+
+        self.avgpool = nn.AdaptiveAvgPool2d((1,1))
+        self.fc = nn.Linear(512, num_classes)
+
+    def make_layer(self, out_channels, num_blocks, stride):
+        layers = []
+
+        layers.append(ResidualBlock2D(self.in_channels, out_channels, stride))
+        self.in_channels = out_channels
+
+        for _ in range(1, num_blocks):
+            layers.append(ResidualBlock2D(self.in_channels, out_channels))
+
+        return nn.Sequential(*layers)
+    
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        
+        out = self.maxpool(out)
+
+        out = self.layer1(out)
+
+        out = self.layer2(out)
+
+        out = self.layer3(out)
+
+        out = self.layer4(out)
+
+        out = self.avgpool(out)
+        out = torch.flatten(out, 1)
+        out = self.fc(out)
+
+        return out
+########################################################################################
+
 # Pretrained ResNet-18 Architecture ####################################################
 class ResNet18(nn.Module):
     def __init__(self, num_classes=2):
         super(ResNet18, self).__init__()
         self.model = models.resnet18(weights='DEFAULT')
+        self.model.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+
+    def forward(self, x):
+        return self.model(x)
+########################################################################################
+
+# ResNet-34 Architecture (From Scratch) ###############################################
+class ResNet34(nn.Module):
+    def __init__(self, num_classes=2):
+        super(ResNet34, self).__init__()
+        self.model = models.resnet34(weights=None)  # Train from scratch, no pretrained weights
         self.model.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
 
