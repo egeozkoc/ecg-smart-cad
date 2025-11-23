@@ -247,9 +247,9 @@ if __name__ == '__main__':
 
 
             current_time = time.strftime('%Y-%m-%d-%H-%M-%S')
-            model = ECGSMARTNET_Attention(attention='se').to(device)
-            wandb.init(project='ecgsmartnet-cad-final', 
-                       config={'model': 'ECGSMARTNET_SE', 
+            model = TemporalResNet34().to(device)
+            wandb.init(project='ecgsmartnet-cad-temporal-resnet34', 
+                       config={'model': 'TemporalResNet34', 
                                'outcome': 'CAD', 
                                'optimizer': 'AdamW',
                                'num_epochs': 200,
@@ -257,7 +257,6 @@ if __name__ == '__main__':
                                'lr': lr,
                                'bs': bs,
                                'weight decay': wd,
-                               'attention': 'se',
                                'time': current_time
                         }
             )
@@ -305,7 +304,7 @@ if __name__ == '__main__':
 
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
-                    model_filename = f'models/ecgsmartnet_CAD__{current_time}.pt'
+                    model_filename = f'models/temporal_resnet34_CAD__{current_time}.pt'
                     torch.save(model, model_filename)
                     wandb.run.summary['best_val_loss'] = val_loss
                     wandb.run.summary['best_val_auc'] = val_auc
